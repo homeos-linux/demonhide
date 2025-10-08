@@ -29,17 +29,19 @@ jobs:
           glib2-devel \
           pkg-config \
           gcc \
-          git
+          git \
+          curl
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
 
-    - name: Fix Cargo.lock version compatibility
+    - name: Verify Rust installation
       run: |
-        rm -f Cargo.lock
-        cargo generate-lockfile
+        rustc --version
+        cargo --version
+        rustup --version
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
@@ -79,12 +81,18 @@ jobs:
           glib2-devel \
           pkg-config \
           gcc \
-          git
+          git \
+          curl
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
+
+    - name: Verify Rust installation
+      run: |
+        rustc --version
+        cargo --version
 
     - name: Fix Cargo.lock version compatibility
       run: |
@@ -115,10 +123,15 @@ jobs:
     - name: Install system dependencies
       run: |
         dnf update -y
-        dnf install -y gcc git
+        dnf install -y gcc git curl
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Verify Rust installation
+      run: |
+        rustc --version
+        cargo --version
 
     - name: Fix Cargo.lock version compatibility
       run: |
@@ -150,10 +163,16 @@ jobs:
           glib2-devel \
           pkg-config \
           gcc \
-          git
+          git \
+          curl
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Verify Rust installation
+      run: |
+        rustc --version
+        cargo --version
 
     - name: Fix Cargo.lock version compatibility
       run: |

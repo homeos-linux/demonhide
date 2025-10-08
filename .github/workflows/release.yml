@@ -58,16 +58,24 @@ jobs:
           glib2-devel \
           pkg-config \
           gcc \
-          git
+          git \
+          curl
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: ${{ matrix.target }}
 
+    - name: Verify Rust installation
+      run: |
+        rustc --version
+        cargo --version
+        rustup --version
+
     - name: Fix Cargo.lock version compatibility
       run: |
         rm -f Cargo.lock
+        cargo generate-lockfile
         cargo generate-lockfile
 
     - name: Install cross-compilation tools
