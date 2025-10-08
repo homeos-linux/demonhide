@@ -62,7 +62,7 @@ jobs:
     name: Build on multiple targets
     strategy:
       matrix:
-        rust: [stable, 1.70.0]
+        rust: [stable, 1.90.0]
     
     runs-on: ubuntu-latest
     container:
