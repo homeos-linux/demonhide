@@ -56,10 +56,10 @@ jobs:
           libglib2.0-dev \
           pkg-config
 
-    - name: Install Rust 1.70.0 (MSRV)
+    - name: Install Rust 1.90.0 (MSRV)
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: 1.70.0
+        toolchain: 1.90.0
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
