@@ -1,0 +1,18 @@
+[build]
+# Use incremental compilation for faster CI builds
+incremental = true
+
+[profile.dev]
+# Faster linking for development
+split-debuginfo = "unpacked"
+
+[profile.release]
+# Optimize for binary size and performance
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[net]
+# Use sparse registry for faster dependency resolution
+git-fetch-with-cli = true

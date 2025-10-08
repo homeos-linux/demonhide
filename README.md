@@ -1,5 +1,9 @@
 # DemonHide
 
+[![CI](https://github.com/homeos-linux/demonhide/workflows/CI/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/ci.yml)
+[![Code Quality](https://github.com/homeos-linux/demonhide/workflows/Code%20Quality/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/quality.yml)
+[![Release](https://github.com/homeos-linux/demonhide/workflows/Release/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/release.yml)
+
 A lightweight daemon for automatically managing pointer constraints on Wayland compositors when games are detected.
 
 ## Overview
