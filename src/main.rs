@@ -1,17 +1,10 @@
 use glib::MainLoop;
 use sysinfo::{System, RefreshKind, ProcessRefreshKind};
-use std::os::raw::c_void;
 use wayland_client::{Connection, Dispatch, QueueHandle};
 use wayland_client::protocol::{wl_registry, wl_seat, wl_pointer, wl_surface, wl_compositor, wl_shell, wl_shell_surface};
 use wayland_protocols::wp::pointer_constraints::zv1::client::{
     zwp_pointer_constraints_v1, zwp_locked_pointer_v1
 };
-
-// We'll keep the C extern declarations for now but won't use them
-extern "C" {
-    fn init_pointer_constraints(display: *mut c_void);
-    fn lock_pointer(surface: *mut c_void, pointer: *mut c_void);
-}
 
 struct AppData {
     pointer_constraints: Option<zwp_pointer_constraints_v1::ZwpPointerConstraintsV1>,
