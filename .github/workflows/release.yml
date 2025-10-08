@@ -37,13 +37,13 @@ jobs:
           - aarch64-unknown-linux-gnu
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
             cross: false
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
             cross: true
     
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
     
     steps:
     - name: Checkout code
@@ -51,28 +51,35 @@ jobs:
 
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libwayland-dev \
-          wayland-protocols \
-          libglib2.0-dev \
-          pkg-config
+        dnf update -y
+        dnf install -y \
+          wayland-devel \
+          wayland-protocols-devel \
+          glib2-devel \
+          pkg-config \
+          gcc \
+          git
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: ${{ matrix.target }}
 
+    - name: Fix Cargo.lock version compatibility
+      run: |
+        rm -f Cargo.lock
+        cargo generate-lockfile
+
     - name: Install cross-compilation tools
       if: matrix.cross
       run: |
         cargo install cross
-        sudo apt-get install -y gcc-aarch64-linux-gnu
+        dnf install -y gcc-aarch64-linux-gnu
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ matrix.target }}
+        key: fedora42-${{ matrix.target }}
 
     - name: Build release
       run: |

@@ -13,6 +13,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    container:
+      image: fedora:42
     
     steps:
     - name: Checkout code
@@ -20,17 +22,24 @@ jobs:
 
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libwayland-dev \
-          wayland-protocols \
-          libglib2.0-dev \
-          pkg-config
+        dnf update -y
+        dnf install -y \
+          wayland-devel \
+          wayland-protocols-devel \
+          glib2-devel \
+          pkg-config \
+          gcc \
+          git
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
+
+    - name: Fix Cargo.lock version compatibility
+      run: |
+        rm -f Cargo.lock
+        cargo generate-lockfile
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
@@ -51,10 +60,11 @@ jobs:
     name: Build on multiple targets
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-20.04]
         rust: [stable, 1.70.0]
     
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
     
     steps:
     - name: Checkout code
@@ -62,22 +72,29 @@ jobs:
 
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libwayland-dev \
-          wayland-protocols \
-          libglib2.0-dev \
-          pkg-config
+        dnf update -y
+        dnf install -y \
+          wayland-devel \
+          wayland-protocols-devel \
+          glib2-devel \
+          pkg-config \
+          gcc \
+          git
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
 
+    - name: Fix Cargo.lock version compatibility
+      run: |
+        rm -f Cargo.lock
+        cargo generate-lockfile
+
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ matrix.os }}-${{ matrix.rust }}
+        key: fedora42-${{ matrix.rust }}
 
     - name: Build debug
       run: cargo build --verbose
@@ -88,13 +105,25 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    container:
+      image: fedora:42
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Install system dependencies
+      run: |
+        dnf update -y
+        dnf install -y gcc git
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Fix Cargo.lock version compatibility
+      run: |
+        rm -f Cargo.lock
+        cargo generate-lockfile
 
     - name: Install cargo-audit
       run: cargo install cargo-audit
@@ -105,6 +134,8 @@ jobs:
   check-dependencies:
     name: Check Dependencies
     runs-on: ubuntu-latest
+    container:
+      image: fedora:42
     
     steps:
     - name: Checkout code
@@ -112,15 +143,22 @@ jobs:
 
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libwayland-dev \
-          wayland-protocols \
-          libglib2.0-dev \
-          pkg-config
+        dnf update -y
+        dnf install -y \
+          wayland-devel \
+          wayland-protocols-devel \
+          glib2-devel \
+          pkg-config \
+          gcc \
+          git
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Fix Cargo.lock version compatibility
+      run: |
+        rm -f Cargo.lock
+        cargo generate-lockfile
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
