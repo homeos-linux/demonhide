@@ -7,6 +7,5 @@ rust-version = "1.90.0"
 [dependencies]
 glib = "0.17"
 wayland-client = "0.31"
-wayland-sys = "0.31"
 wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 sysinfo = "0.37"
