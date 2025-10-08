@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Pointer Lock Daemon
+Exec=/usr/local/bin/demonhide
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+Comment=Daemon that locks pointer on Wayland when the cursor is hidden by a game
