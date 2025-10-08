@@ -15,7 +15,6 @@ struct AppData {
     compositor: Option<wl_compositor::WlCompositor>,
     surface: Option<wl_surface::WlSurface>,
     shell: Option<wl_shell::WlShell>,
-    shell_surface: Option<wl_shell_surface::WlShellSurface>,
     locked_pointer: Option<zwp_locked_pointer_v1::ZwpLockedPointerV1>,
 }
 
@@ -196,7 +195,6 @@ impl Dispatch<zwp_locked_pointer_v1::ZwpLockedPointerV1, ()> for AppData {
 
 struct PointerLockDaemon {
     cursor_hidden: bool,
-    conn: Option<Connection>,
     app_data: Option<AppData>,
     event_queue: Option<wayland_client::EventQueue<AppData>>,
     is_locked: bool,              // Track current lock state
@@ -218,7 +216,6 @@ impl PointerLockDaemon {
                     compositor: None,
                     surface: None,
                     shell: None,
-                    shell_surface: None,
                     locked_pointer: None,
                 };
 
@@ -257,7 +254,6 @@ impl PointerLockDaemon {
 
                 Ok(PointerLockDaemon {
                     cursor_hidden: true,
-                    conn: Some(conn),
                     app_data: Some(app_data),
                     event_queue: Some(event_queue),
                     is_locked: false,
@@ -272,7 +268,6 @@ impl PointerLockDaemon {
                 );
                 Ok(PointerLockDaemon {
                     cursor_hidden: true,
-                    conn: None,
                     app_data: None,
                     event_queue: None,
                     is_locked: false,
@@ -298,7 +293,7 @@ impl PointerLockDaemon {
             static mut DEBUG_COUNTER: u32 = 0;
             unsafe {
                 DEBUG_COUNTER += 1;
-                if DEBUG_COUNTER % 10 == 0 {
+                if DEBUG_COUNTER.is_multiple_of(10) {
                     // Every 5 seconds
                     let interesting_processes: Vec<_> = sys
                         .processes()
@@ -343,22 +338,19 @@ impl PointerLockDaemon {
                 }
 
                 // More specific game detection
-                let is_game =
-                    // Wine games (but not wine itself)
-                    (name.contains("wine64") && cmd_string.contains(".exe")) ||
-                    // Proton games
-                    (name.contains("proton") && cmd_string.contains(".exe")) ||
-                    // Games in steamapps directory
-                    cmd_string.contains("steamapps/common") ||
-                    // Lutris games
-                    (name.contains("lutris") && cmd_string.contains(".exe")) ||
-                    // Direct .exe execution (but exclude system tools)
-                    (cmd_string.contains(".exe") &&
-                     !cmd_string.contains("steam") &&
-                     !cmd_string.contains("helper") &&
-                     !cmd_string.contains("launcher"));
-
-                is_game
+                // Wine games (but not wine itself)
+                (name.contains("wine64") && cmd_string.contains(".exe")) ||
+                // Proton games
+                (name.contains("proton") && cmd_string.contains(".exe")) ||
+                // Games in steamapps directory
+                cmd_string.contains("steamapps/common") ||
+                // Lutris games
+                (name.contains("lutris") && cmd_string.contains(".exe")) ||
+                // Direct .exe execution (but exclude system tools)
+                (cmd_string.contains(".exe") &&
+                 !cmd_string.contains("steam") &&
+                 !cmd_string.contains("helper") &&
+                 !cmd_string.contains("launcher"))
             })
             .map(|p| format!("{}[{}]", p.name().to_string_lossy(), p.pid()))
             .collect();
@@ -499,7 +491,7 @@ impl PointerLockDaemon {
             static mut DEBUG_COUNTER: u32 = 0;
             unsafe {
                 DEBUG_COUNTER += 1;
-                if DEBUG_COUNTER % 6 == 0 {
+                if DEBUG_COUNTER.is_multiple_of(6) {
                     // Print every 3 seconds
                     println!(
                         "🔍 Status: Game: {}, Locked: {}, Stable: {}/{}",
