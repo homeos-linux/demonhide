@@ -6,6 +6,7 @@ changelog_format = %s (%ae)
 
 [builder]
 offline = false
+spec_file = demonhide.spec
 
 [requirements]
 tito>=0.6.2
