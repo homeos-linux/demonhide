@@ -54,7 +54,6 @@ install -D -m 755 target/release/%{name} %{buildroot}%{_bindir}/%{name}
 %license LICENSE
 %doc README.md
 %{_bindir}/%{name}
-%{_datadir}/applications/%{name}.desktop
 
 %changelog
 * Thu Oct 09 2025 Leonie Ain <me@koyu.space> - 0.1.1-1
