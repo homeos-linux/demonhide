@@ -29,6 +29,12 @@ jobs:
           glib2-devel \
           libX11-devel \
           libXfixes-devel \
+          libXcursor-devel \
+          libxkbcommon-devel \
+          libXi-devel \
+          libxkbcommon-x11-devel \
+          libxcb-devel \
+          glib2-devel \
           pkg-config \
           gcc \
           git \
@@ -81,6 +87,7 @@ jobs:
           wayland-devel \
           wayland-protocols-devel \
           libX11-devel \
+          libXfixes-devel \
           libXcursor-devel \
           libxkbcommon-devel \
           libXi-devel \
@@ -168,6 +175,13 @@ jobs:
         dnf install -y \
           wayland-devel \
           wayland-protocols-devel \
+          libX11-devel \
+          libXfixes-devel \
+          libXcursor-devel \
+          libxkbcommon-devel \
+          libXi-devel \
+          libxkbcommon-x11-devel \
+          libxcb-devel \
           glib2-devel \
           pkg-config \
           gcc \
