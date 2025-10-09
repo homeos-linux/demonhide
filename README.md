@@ -4,34 +4,36 @@
 [![Code Quality](https://github.com/homeos-linux/demonhide/workflows/Code%20Quality/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/quality.yml)
 [![Release](https://github.com/homeos-linux/demonhide/workflows/Release/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/release.yml)
 
-A lightweight daemon for automatically managing pointer constraints on Wayland compositors when games are detected.
+A lightweight daemon for automatically managing pointer constraints on Wayland compositors for XWayland fullscreen applications with hidden cursors.
 
 ## Overview
 
-DemonHide monitors running processes and automatically locks the mouse pointer when games are detected, preventing cursor movement outside the game window. This is particularly useful for:
+DemonHide monitors XWayland applications and automatically locks the mouse pointer when fullscreen applications with hidden cursors are detected, preventing cursor movement outside the application window. This is particularly useful for:
 
-- Gaming with Wine/Proton games
-- Steam games running through compatibility layers
-- Preventing cursor "escaping" during fullscreen gaming
-- Improving gaming experience on multi-monitor setups
+- Fullscreen applications running through XWayland
+- Media players and video applications
+- Preventing cursor "escaping" during fullscreen use
+- Improving user experience on multi-monitor setups
 
 ## Features
 
-- 🎮 **Automatic game detection** - Detects Wine64, Proton, and Steam games
-- 🔒 **Wayland pointer locking** - Uses modern Wayland pointer constraints protocol
+- 🖥️ **Automatic fullscreen detection** - Detects XWayland fullscreen applications
+- �️ **Cursor visibility detection** - Monitors cursor state using X11/XFixes
+- �🔒 **Wayland pointer locking** - Uses modern Wayland pointer constraints protocol
 - 🚀 **Pure Rust implementation** - Fast, safe, and reliable
-- 🔍 **Smart filtering** - Excludes Steam helper processes to avoid false positives
-- ⚡ **Debounced detection** - Prevents rapid lock/unlock cycles
+- ⚡ **Real-time monitoring** - Responsive detection and locking
 - 🛡️ **Resource efficient** - Minimal system impact
 
 ## Requirements
 
 - **Wayland compositor** with pointer constraints support (most modern compositors)
-- **Rust** 1.70+ for building
+- **XWayland** for X11 application compatibility
+- **Rust** 1.82+ for building
 - **System packages**:
   - `wayland-client` library
   - `wayland-protocols`
   - `glib2`
+  - `libX11` and `libXfixes` (for cursor detection)
 
 ### Supported Compositors
 
@@ -60,19 +62,19 @@ sudo cp target/release/demonhide /usr/local/bin/
 ### Dependencies (Fedora/RHEL)
 
 ```bash
-sudo dnf install wayland-devel wayland-protocols-devel glib2-devel
+sudo dnf install wayland-devel wayland-protocols-devel glib2-devel libX11-devel libXfixes-devel
 ```
 
 ### Dependencies (Ubuntu/Debian)
 
 ```bash
-sudo apt install libwayland-dev wayland-protocols libglib2.0-dev
+sudo apt install libwayland-dev wayland-protocols libglib2.0-dev libx11-dev libxfixes-dev
 ```
 
 ### Dependencies (Arch Linux)
 
 ```bash
-sudo pacman -S wayland wayland-protocols glib2
+sudo pacman -S wayland wayland-protocols glib2 libx11 libxfixes
 ```
 
 ## Usage
@@ -128,29 +130,27 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 ```
 
-## Game Detection
+## Application Detection
 
-DemonHide automatically detects games by monitoring processes for:
+DemonHide automatically detects when to lock the pointer by monitoring:
 
-### Included Patterns
-- **Wine games**: `wine64` processes running `.exe` files
-- **Proton games**: `proton` processes running `.exe` files  
-- **Steam games**: Processes in `steamapps/common` directories
-- **Lutris games**: `lutris` processes running `.exe` files
-- **Direct executables**: `.exe` files (excluding system tools)
+### Detection Criteria
+- **XWayland session**: Both `WAYLAND_DISPLAY` and `DISPLAY` environment variables present
+- **Fullscreen applications**: Applications covering the entire screen dimensions
+- **Hidden cursor**: Applications that have hidden or minimized their cursor (≤1x1 pixels)
 
-### Excluded Patterns
-- Steam helper processes (`steamwebhelper`, `GameOverlayUI`)
-- Steam client (`steam.exe`, `steamcmd`)
-- System launchers and helpers
+### Technical Details
+- Uses X11 `XGetInputFocus` to find the currently focused window
+- Checks window attributes with `XGetWindowAttributes` for fullscreen detection
+- Uses XFixes extension (`XFixesGetCursorImage`) for cursor visibility detection
 
 ## Configuration
 
 Currently, DemonHide works with sensible defaults. Future versions may include:
 
-- Custom process patterns
+- Custom application patterns
 - Configurable detection sensitivity
-- Per-game settings
+- Per-application settings
 - GUI configuration tool
 
 ## Troubleshooting
@@ -169,6 +169,11 @@ Currently, DemonHide works with sensible defaults. Future versions may include:
    cargo run
    ```
 
+2. **Check XWayland availability**:
+   ```bash
+   echo $DISPLAY  # Should show XWayland display (e.g., :0)
+   ```
+
 3. **Verify Wayland session**:
    ```bash
    echo $XDG_SESSION_TYPE  # Should output "wayland"
@@ -182,8 +187,15 @@ Currently, DemonHide works with sensible defaults. Future versions may include:
 ### High CPU Usage
 
 - Normal CPU usage should be minimal (~0.1%)
-- High usage may indicate process scanning issues
+- High usage may indicate X11 connection issues
 - Check for excessive debug output in non-release builds
+
+### XFixes Extension Issues
+
+```bash
+# Check if XFixes extension is available
+xdpyinfo | grep XFIXES
+```
 
 ## Development
 

@@ -370,7 +370,7 @@ impl PointerLockDaemon {
                     return;
                 }
 
-                println!("🔒 Locking pointer for XWayland fullscreen app with hidden cursor");
+                println!("🔒 Locking pointer for XWayland fullscreen application with hidden cursor");
 
                 // Lock the pointer to our surface
                 let locked_pointer = pointer_constraints.lock_pointer(
