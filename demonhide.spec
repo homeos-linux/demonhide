@@ -31,8 +31,21 @@ outside the application window.
 %prep
 %autosetup
 
+# Copy the vendored crates and config to a temp CARGO_HOME
+mkdir -p %{_builddir}/cargo_home
+cp -r vendor %{_builddir}/cargo_home/vendor
+mkdir -p %{_builddir}/cargo_home/.cargo
+cat > %{_builddir}/cargo_home/.cargo/config.toml <<'EOF'
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
+
 %build
-cargo build --offline --release
+# Tell cargo to use the temp CARGO_HOME
+CARGO_HOME=%{_builddir}/cargo_home cargo build --release --offline
 
 %install
 install -D -m 755 target/release/%{name} %{buildroot}%{_bindir}/%{name}
