@@ -80,6 +80,12 @@ jobs:
         dnf install -y \
           wayland-devel \
           wayland-protocols-devel \
+          libX11-devel \
+          libXcursor-devel \
+          libxkbcommon-devel \
+          libXi-devel \
+          libxkbcommon-x11-devel \
+          libxcb-devel \
           glib2-devel \
           pkg-config \
           gcc \

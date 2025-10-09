@@ -13,12 +13,12 @@ fn should_lock_pointer() -> bool {
     if std::env::var("WAYLAND_DISPLAY").is_err() {
         return false; // Not in Wayland
     }
-    
+
     // Check if there's an X11 display (XWayland)
     if std::env::var("DISPLAY").is_err() {
         return false; // No XWayland
     }
-    
+
     // Check XWayland for fullscreen applications with hidden cursor
     check_xwayland_fullscreen_with_hidden_cursor()
 }
@@ -29,46 +29,47 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
         if display.is_null() {
             return false;
         }
-        
+
         let root = x11::xlib::XDefaultRootWindow(display);
         let screen = x11::xlib::XDefaultScreen(display);
         let screen_width = x11::xlib::XDisplayWidth(display, screen);
         let screen_height = x11::xlib::XDisplayHeight(display, screen);
-        
+
         // Get the currently focused window
         let mut focus_window = 0;
         let mut revert_to = 0;
         x11::xlib::XGetInputFocus(display, &mut focus_window, &mut revert_to);
-        
+
         if focus_window == 0 || focus_window == root {
             x11::xlib::XCloseDisplay(display);
             return false;
         }
-        
+
         // Get window attributes
         let mut window_attrs = std::mem::zeroed();
         if x11::xlib::XGetWindowAttributes(display, focus_window, &mut window_attrs) == 0 {
             x11::xlib::XCloseDisplay(display);
             return false;
         }
-        
+
         // Check if window is fullscreen (covers entire screen)
-        let is_fullscreen = window_attrs.width >= screen_width && window_attrs.height >= screen_height;
-        
+        let is_fullscreen =
+            window_attrs.width >= screen_width && window_attrs.height >= screen_height;
+
         if !is_fullscreen {
             x11::xlib::XCloseDisplay(display);
             return false;
         }
-        
+
         // Check if cursor is hidden using XFixes
         let mut event_base = 0;
         let mut error_base = 0;
-        
+
         if x11::xfixes::XFixesQueryExtension(display, &mut event_base, &mut error_base) == 0 {
             x11::xlib::XCloseDisplay(display);
             return false; // XFixes not available
         }
-        
+
         let cursor_image = x11::xfixes::XFixesGetCursorImage(display);
         let cursor_hidden = if cursor_image.is_null() {
             true // If we can't get cursor info, assume it might be hidden
@@ -77,13 +78,13 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
             // Cursor is considered hidden if it has no dimensions or is 1x1 (common for hidden cursors)
             cursor.width <= 1 && cursor.height <= 1
         };
-        
+
         if !cursor_image.is_null() {
             x11::xlib::XFree(cursor_image as *mut _);
         }
-        
+
         x11::xlib::XCloseDisplay(display);
-        
+
         cursor_hidden
     }
 }
@@ -370,7 +371,9 @@ impl PointerLockDaemon {
                     return;
                 }
 
-                println!("🔒 Locking pointer for XWayland fullscreen application with hidden cursor");
+                println!(
+                    "🔒 Locking pointer for XWayland fullscreen application with hidden cursor"
+                );
 
                 // Lock the pointer to our surface
                 let locked_pointer = pointer_constraints.lock_pointer(
