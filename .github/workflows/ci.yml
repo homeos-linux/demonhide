@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'vendor/**'
+      - '.cargo/**'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'vendor/**'
+      - '.cargo/**'
 
 env:
   CARGO_TERM_COLOR: always

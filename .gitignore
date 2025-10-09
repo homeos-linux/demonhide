@@ -6,3 +6,6 @@ target
 build/
 # RPM development
 rpmbuild/
+
+# Note: vendor/ and .cargo/ are intentionally tracked for COPR builds
+# They contain vendored Rust dependencies needed for offline builds
