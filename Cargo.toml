@@ -1,6 +1,6 @@
 [package]
 name = "demonhide"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.90.0"
 description = "Automatic pointer locking daemon for XWayland fullscreen applications with hidden cursors"

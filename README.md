@@ -228,10 +228,9 @@ cargo test
 
 ### Architecture
 
-- **Process Detection**: Uses `sysinfo` crate for efficient process monitoring
 - **Wayland Integration**: Direct protocol implementation via `wayland-client`
 - **Event Loop**: GLib main loop for event handling
-- **State Management**: Debounced state machine for reliable game detection
+- **State Management**: Debounced state machine for reliable detection
 
 ## License
 
@@ -252,6 +251,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Gaming on Linux community
 
 ## Changelog
+
+### v0.1.1
+- Updated Rust version requirement to 1.90+
+- Enhanced installation instructions with detailed system dependencies
+- Improved application detection logic
+- Make it a general purpose tool for all XWayland fullscreen apps
+- Added CI/CD workflows for automated testing and releases
 
 ### v0.1.0
 - Initial release
