@@ -21,9 +21,17 @@ srpm:
 	# Set up RPM build tree
 	mkdir -p ~/rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
 	
-	# Create source tarball from git
+	# Create source tarball
 	@echo "Creating source tarball..."
-	git archive --format=tar.gz --prefix="$(PACKAGE_NAME)-$(VERSION)/" HEAD > ~/rpmbuild/SOURCES/$(PACKAGE_NAME)-$(VERSION).tar.gz
+	@if command -v git >/dev/null 2>&1; then \
+		echo "Using git archive to create tarball..."; \
+		git archive --format=tar.gz --prefix="$(PACKAGE_NAME)-$(VERSION)/" HEAD > ~/rpmbuild/SOURCES/$(PACKAGE_NAME)-$(VERSION).tar.gz; \
+	else \
+		echo "Git not available, creating tarball from current directory..."; \
+		tar --exclude='.git' --exclude='target' --exclude='*.rpm' --exclude='*.src.rpm' \
+		    --exclude='rpmbuild' --exclude='build' --transform 's,^,$(PACKAGE_NAME)-$(VERSION)/,' \
+		    -czf ~/rpmbuild/SOURCES/$(PACKAGE_NAME)-$(VERSION).tar.gz *; \
+	fi
 	
 	# Build SRPM
 	@echo "Building SRPM..."
