@@ -1,4 +1,5 @@
 #!/bin/bash
 cargo vendor
-tar czf demonhide-0.1.1.tar.gz --transform 's,^,demonhide-0.1.1/,' \
-  Cargo.toml Cargo.lock src vendor .cargo
+VERSION=$(grep -m 1 '^version = ' Cargo.toml | cut -d '"' -f2)
+tar czf "demonhide-$VERSION.tar.gz" --transform "s,^,demonhide-$VERSION/," \
+    Cargo.toml Cargo.lock src vendor .cargo
