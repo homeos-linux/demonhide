@@ -1,0 +1,11 @@
+[buildconfig]
+builder = tito.builder.Builder
+tagger = tito.tagger.VersionTagger
+changelog_do_not_remove_cherrypick = 0
+changelog_format = %s (%ae)
+
+[builder]
+offline = false
+
+[requirements]
+tito>=0.6.2
