@@ -16,7 +16,8 @@ BuildRequires:  libX11-devel
 BuildRequires:  libXfixes-devel
 BuildRequires:  pkgconfig
 
-Requires:       wayland
+Requires:       libwayland-cursor
+Requires:       libwayland-egl
 Requires:       libX11
 Requires:       libXfixes
 Requires:       glib2
