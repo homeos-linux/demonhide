@@ -32,7 +32,7 @@ outside the application window.
 %autosetup
 
 %build
-cargo build --release
+cargo build --offline --release
 
 %install
 install -D -m 755 target/release/%{name} %{buildroot}%{_bindir}/%{name}
@@ -45,7 +45,7 @@ install -D -m 644 %{name}.desktop %{buildroot}%{_datadir}/applications/%{name}.d
 %{_datadir}/applications/%{name}.desktop
 
 %changelog
-* Thu Oct 10 2025 Leonie Ain <me@koyu.space> - 0.1.1-1
+* Thu Oct 09 2025 Leonie Ain <me@koyu.space> - 0.1.1-1
 - Initial package release
 - Automatic pointer constraint management for XWayland applications
 - Fullscreen application detection with cursor visibility checking
