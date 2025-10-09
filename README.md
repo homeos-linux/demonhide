@@ -18,8 +18,8 @@ DemonHide monitors XWayland applications and automatically locks the mouse point
 ## Features
 
 - 🖥️ **Automatic fullscreen detection** - Detects XWayland fullscreen applications
-- �️ **Cursor visibility detection** - Monitors cursor state using X11/XFixes
-- �🔒 **Wayland pointer locking** - Uses modern Wayland pointer constraints protocol
+- 👁️ **Cursor visibility detection** - Monitors cursor state using X11/XFixes
+- 🔒 **Wayland pointer locking** - Uses modern Wayland pointer constraints protocol
 - 🚀 **Pure Rust implementation** - Fast, safe, and reliable
 - ⚡ **Real-time monitoring** - Responsive detection and locking
 - 🛡️ **Resource efficient** - Minimal system impact
