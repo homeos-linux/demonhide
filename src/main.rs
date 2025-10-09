@@ -465,7 +465,9 @@ fn main() {
         match args[1].as_str() {
             "--help" | "-h" => {
                 println!("DemonHide v{}", env!("CARGO_PKG_VERSION"));
-                println!("Automatic pointer constraint daemon for XWayland fullscreen applications");
+                println!(
+                    "Automatic pointer constraint daemon for XWayland fullscreen applications"
+                );
                 println!();
                 println!("USAGE:");
                 println!("    {} [OPTIONS]", args[0]);
