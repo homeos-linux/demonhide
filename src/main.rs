@@ -1,5 +1,5 @@
 use glib::MainLoop;
-use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use std::ptr;
 use wayland_client::protocol::{
     wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shell, wl_shell_surface, wl_surface,
 };
@@ -7,6 +7,86 @@ use wayland_client::{Connection, Dispatch, QueueHandle};
 use wayland_protocols::wp::pointer_constraints::zv1::client::{
     zwp_locked_pointer_v1, zwp_pointer_constraints_v1,
 };
+
+fn should_lock_pointer() -> bool {
+    // Check if we're in a Wayland session
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        return false; // Not in Wayland
+    }
+    
+    // Check if there's an X11 display (XWayland)
+    if std::env::var("DISPLAY").is_err() {
+        return false; // No XWayland
+    }
+    
+    // Check XWayland for fullscreen applications with hidden cursor
+    check_xwayland_fullscreen_with_hidden_cursor()
+}
+
+fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
+    unsafe {
+        let display = x11::xlib::XOpenDisplay(ptr::null());
+        if display.is_null() {
+            return false;
+        }
+        
+        let root = x11::xlib::XDefaultRootWindow(display);
+        let screen = x11::xlib::XDefaultScreen(display);
+        let screen_width = x11::xlib::XDisplayWidth(display, screen);
+        let screen_height = x11::xlib::XDisplayHeight(display, screen);
+        
+        // Get the currently focused window
+        let mut focus_window = 0;
+        let mut revert_to = 0;
+        x11::xlib::XGetInputFocus(display, &mut focus_window, &mut revert_to);
+        
+        if focus_window == 0 || focus_window == root {
+            x11::xlib::XCloseDisplay(display);
+            return false;
+        }
+        
+        // Get window attributes
+        let mut window_attrs = std::mem::zeroed();
+        if x11::xlib::XGetWindowAttributes(display, focus_window, &mut window_attrs) == 0 {
+            x11::xlib::XCloseDisplay(display);
+            return false;
+        }
+        
+        // Check if window is fullscreen (covers entire screen)
+        let is_fullscreen = window_attrs.width >= screen_width && window_attrs.height >= screen_height;
+        
+        if !is_fullscreen {
+            x11::xlib::XCloseDisplay(display);
+            return false;
+        }
+        
+        // Check if cursor is hidden using XFixes
+        let mut event_base = 0;
+        let mut error_base = 0;
+        
+        if x11::xfixes::XFixesQueryExtension(display, &mut event_base, &mut error_base) == 0 {
+            x11::xlib::XCloseDisplay(display);
+            return false; // XFixes not available
+        }
+        
+        let cursor_image = x11::xfixes::XFixesGetCursorImage(display);
+        let cursor_hidden = if cursor_image.is_null() {
+            true // If we can't get cursor info, assume it might be hidden
+        } else {
+            let cursor = &*cursor_image;
+            // Cursor is considered hidden if it has no dimensions or is 1x1 (common for hidden cursors)
+            cursor.width <= 1 && cursor.height <= 1
+        };
+        
+        if !cursor_image.is_null() {
+            x11::xlib::XFree(cursor_image as *mut _);
+        }
+        
+        x11::xlib::XCloseDisplay(display);
+        
+        cursor_hidden
+    }
+}
 
 struct AppData {
     pointer_constraints: Option<zwp_pointer_constraints_v1::ZwpPointerConstraintsV1>,
@@ -194,12 +274,9 @@ impl Dispatch<zwp_locked_pointer_v1::ZwpLockedPointerV1, ()> for AppData {
 }
 
 struct PointerLockDaemon {
-    cursor_hidden: bool,
     app_data: Option<AppData>,
     event_queue: Option<wayland_client::EventQueue<AppData>>,
-    is_locked: bool,              // Track current lock state
-    last_game_state: bool,        // Track previous game detection state
-    game_state_stable_count: u32, // Count stable state cycles for debouncing
+    is_locked: bool, // Track current lock state
 }
 
 impl PointerLockDaemon {
@@ -253,12 +330,9 @@ impl PointerLockDaemon {
                 println!("Wayland protocols initialized successfully");
 
                 Ok(PointerLockDaemon {
-                    cursor_hidden: true,
                     app_data: Some(app_data),
                     event_queue: Some(event_queue),
                     is_locked: false,
-                    last_game_state: false,
-                    game_state_stable_count: 0,
                 })
             }
             Err(e) => {
@@ -267,101 +341,16 @@ impl PointerLockDaemon {
                     e
                 );
                 Ok(PointerLockDaemon {
-                    cursor_hidden: true,
                     app_data: None,
                     event_queue: None,
                     is_locked: false,
-                    last_game_state: false,
-                    game_state_stable_count: 0,
                 })
             }
         }
     }
 
-    fn is_cursor_hidden(&self) -> bool {
-        self.cursor_hidden
-    }
-
-    fn is_game_running(&self) -> bool {
-        let sys = System::new_with_specifics(
-            RefreshKind::nothing().with_processes(ProcessRefreshKind::everything()),
-        );
-
-        // Debug: Show some potentially interesting processes (only in debug builds)
-        #[cfg(debug_assertions)]
-        {
-            static mut DEBUG_COUNTER: u32 = 0;
-            unsafe {
-                DEBUG_COUNTER += 1;
-                if DEBUG_COUNTER.is_multiple_of(10) {
-                    // Every 5 seconds
-                    let interesting_processes: Vec<_> = sys
-                        .processes()
-                        .values()
-                        .filter(|p| {
-                            let name = p.name().to_string_lossy();
-                            name.contains("wine")
-                                || name.contains("steam")
-                                || name.contains("proton")
-                                || name.contains("lutris")
-                                || name.contains(".exe")
-                        })
-                        .map(|p| format!("{}", p.name().to_string_lossy()))
-                        .collect();
-                    if !interesting_processes.is_empty() {
-                        println!("🔍 Interesting processes: {:?}", interesting_processes);
-                    }
-                }
-            }
-        }
-
-        let game_processes: Vec<_> = sys
-            .processes()
-            .values()
-            .filter(|p| {
-                let name = p.name().to_string_lossy();
-                let cmd_string = p
-                    .cmd()
-                    .iter()
-                    .map(|s| s.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                // Exclude Steam helper processes first
-                if name.contains("steamwebhelper")
-                    || name.contains("steam.exe")
-                    || name.contains("steamcmd")
-                    || name.contains("SteamChildMonitor")
-                    || name.contains("GameOverlayUI")
-                {
-                    return false;
-                }
-
-                // More specific game detection
-                // Wine games (but not wine itself)
-                (name.contains("wine64") && cmd_string.contains(".exe")) ||
-                // Proton games
-                (name.contains("proton") && cmd_string.contains(".exe")) ||
-                // Games in steamapps directory
-                cmd_string.contains("steamapps/common") ||
-                // Lutris games
-                (name.contains("lutris") && cmd_string.contains(".exe")) ||
-                // Direct .exe execution (but exclude system tools)
-                (cmd_string.contains(".exe") &&
-                 !cmd_string.contains("steam") &&
-                 !cmd_string.contains("helper") &&
-                 !cmd_string.contains("launcher"))
-            })
-            .map(|p| format!("{}[{}]", p.name().to_string_lossy(), p.pid()))
-            .collect();
-
-        if !game_processes.is_empty() {
-            #[cfg(debug_assertions)]
-            println!("🎮 Found game processes: {:?}", game_processes);
-            true
-        } else {
-            false
-        }
+    fn should_lock(&self) -> bool {
+        should_lock_pointer()
     }
 
     fn lock_pointer(&mut self) {
@@ -371,20 +360,6 @@ impl PointerLockDaemon {
         }
 
         if let (Some(app_data), Some(event_queue)) = (&mut self.app_data, &mut self.event_queue) {
-            #[cfg(debug_assertions)]
-            {
-                println!(
-                    "Debug: compositor available: {}",
-                    app_data.compositor.is_some()
-                );
-                println!("Debug: surface available: {}", app_data.surface.is_some());
-                println!(
-                    "Debug: pointer_constraints available: {}",
-                    app_data.pointer_constraints.is_some()
-                );
-                println!("Debug: pointer available: {}", app_data.pointer.is_some());
-            }
-
             if let (Some(pointer_constraints), Some(pointer), Some(surface)) = (
                 &app_data.pointer_constraints,
                 &app_data.pointer,
@@ -392,12 +367,10 @@ impl PointerLockDaemon {
             ) {
                 // Check if we already have a locked pointer object
                 if app_data.locked_pointer.is_some() {
-                    #[cfg(debug_assertions)]
-                    println!("Pointer lock object already exists");
                     return;
                 }
 
-                println!("🎯 Locking pointer to surface...");
+                println!("🔒 Locking pointer for XWayland fullscreen app with hidden cursor");
 
                 // Lock the pointer to our surface
                 let locked_pointer = pointer_constraints.lock_pointer(
@@ -413,13 +386,13 @@ impl PointerLockDaemon {
                 app_data.locked_pointer = Some(locked_pointer);
                 self.is_locked = true;
 
-                // Process events to handle the lock response with timeout
+                // Process events to handle the lock response
                 match event_queue.dispatch_pending(app_data) {
                     Ok(_) => {
                         println!("✅ Pointer lock request sent successfully");
                     }
-                    Err(e) => {
-                        println!("❌ Error processing pointer lock events: {}", e);
+                    Err(_e) => {
+                        println!("❌ Error processing pointer lock events: {}", _e);
                         self.is_locked = false; // Reset on error
                     }
                 }
@@ -461,9 +434,9 @@ impl PointerLockDaemon {
                         Ok(_) => {
                             println!("✅ Pointer unlock processed");
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             #[cfg(debug_assertions)]
-                            println!("❌ Error processing pointer unlock events: {}", e);
+                            println!("❌ Error processing pointer unlock events: {}", _e);
                         }
                     }
                 }
@@ -471,48 +444,13 @@ impl PointerLockDaemon {
         }
     }
 
-    fn update_pointer_state(&mut self) {
-        let game_running = self.is_game_running();
+    fn update(&mut self) {
+        let should_lock = self.should_lock();
 
-        // Implement debouncing - require 3 stable readings before changing state
-        const STABLE_CYCLES_REQUIRED: u32 = 3;
-
-        if game_running == self.last_game_state {
-            self.game_state_stable_count += 1;
-        } else {
-            // State changed, reset counter
-            self.game_state_stable_count = 0;
-            self.last_game_state = game_running;
-        }
-
-        // Add debug output every few cycles (only in debug builds)
-        #[cfg(debug_assertions)]
-        {
-            static mut DEBUG_COUNTER: u32 = 0;
-            unsafe {
-                DEBUG_COUNTER += 1;
-                if DEBUG_COUNTER.is_multiple_of(6) {
-                    // Print every 3 seconds
-                    println!(
-                        "🔍 Status: Game: {}, Locked: {}, Stable: {}/{}",
-                        game_running,
-                        self.is_locked,
-                        self.game_state_stable_count,
-                        STABLE_CYCLES_REQUIRED
-                    );
-                }
-            }
-        }
-
-        // Only act when state has been stable for required cycles
-        if self.game_state_stable_count >= STABLE_CYCLES_REQUIRED {
-            if game_running && !self.is_locked {
-                println!("🎮 Game confirmed running - locking pointer");
-                self.lock_pointer();
-            } else if !game_running && self.is_locked {
-                println!("🎮 Game confirmed stopped - unlocking pointer");
-                self.unlock_pointer();
-            }
+        if should_lock && !self.is_locked {
+            self.lock_pointer();
+        } else if !should_lock && self.is_locked {
+            self.unlock_pointer();
         }
     }
 }
@@ -540,15 +478,7 @@ fn main() {
 
     glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
         let mut daemon = daemon_clone.borrow_mut();
-
-        // Update pointer state based on game detection
-        if daemon.is_cursor_hidden() {
-            daemon.update_pointer_state();
-        } else if daemon.is_locked {
-            // Unlock if cursor should not be hidden
-            daemon.unlock_pointer();
-        }
-
+        daemon.update();
         glib::Continue(true)
     });
 

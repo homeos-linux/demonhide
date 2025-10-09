@@ -56,6 +56,8 @@ jobs:
           wayland-devel \
           wayland-protocols-devel \
           glib2-devel \
+          libX11-devel \
+          libXfixes-devel \
           pkg-config \
           gcc \
           git \

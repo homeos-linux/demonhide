@@ -8,4 +8,4 @@ rust-version = "1.90.0"
 glib = "0.17"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
-sysinfo = "0.37"
+x11 = { version = "2.21", features = ["xlib", "xfixes"] }
