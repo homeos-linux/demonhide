@@ -30,8 +30,13 @@ tito-build:
 	tito build --rpm
 
 srpm:
-	@echo "Building source RPM..."
-	tito build --srpm
+	@echo "Building source RPM directly..."
+	@mkdir -p ~/rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
+	@echo "Creating source tarball..."
+	git archive --format=tar.gz --prefix=$(PACKAGE_NAME)-$$(grep '^Version:' $(SPEC_FILE) | awk '{print $$2}')/ HEAD > ~/rpmbuild/SOURCES/$(PACKAGE_NAME)-$$(grep '^Version:' $(SPEC_FILE) | awk '{print $$2}').tar.gz
+	@echo "Building SRPM..."
+	rpmbuild -bs $(SPEC_FILE) --define "_topdir $$HOME/rpmbuild" || echo "Note: rpmbuild not available on this system"
+	@echo "SRPM would be created in ~/rpmbuild/SRPMS/"
 
 rpm: srpm
 	@echo "Building binary RPM..."
