@@ -3,6 +3,7 @@
 [![CI](https://github.com/homeos-linux/demonhide/workflows/CI/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/ci.yml)
 [![Code Quality](https://github.com/homeos-linux/demonhide/workflows/Code%20Quality/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/quality.yml)
 [![Release](https://github.com/homeos-linux/demonhide/workflows/Release/badge.svg)](https://github.com/homeos-linux/demonhide/actions/workflows/release.yml)
+[![Copr build status](https://copr.fedorainfracloud.org/coprs/bubblineyuri/homeOS/package/demonhide/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/bubblineyuri/homeOS/package/demonhide/)
 
 A lightweight daemon for automatically managing pointer constraints on Wayland compositors for XWayland fullscreen applications with hidden cursors.
 
