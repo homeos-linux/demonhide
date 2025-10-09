@@ -49,7 +49,6 @@ CARGO_HOME=%{_builddir}/cargo_home cargo build --release --offline
 
 %install
 install -D -m 755 target/release/%{name} %{buildroot}%{_bindir}/%{name}
-install -D -m 644 %{name}.desktop %{buildroot}%{_datadir}/applications/%{name}.desktop
 
 %files
 %license LICENSE
