@@ -28,12 +28,13 @@ DemonHide monitors XWayland applications and automatically locks the mouse point
 
 - **Wayland compositor** with pointer constraints support (most modern compositors)
 - **XWayland** for X11 application compatibility
-- **Rust** 1.82+ for building
+- **Rust** 1.90+ for building
 - **System packages**:
   - `wayland-client` library
   - `wayland-protocols`
   - `glib2`
   - `libX11` and `libXfixes` (for cursor detection)
+  - `pkg-config` (for building)
 
 ### Supported Compositors
 
@@ -44,6 +45,37 @@ DemonHide monitors XWayland applications and automatically locks the mouse point
 - Most compositors supporting `zwp_pointer_constraints_v1`
 
 ## Installation
+
+### Install Rust
+
+If you don't have Rust installed, install it using rustup:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+```
+
+### System Dependencies
+
+Install the required system packages for your distribution:
+
+#### Dependencies (Fedora/RHEL)
+
+```bash
+sudo dnf install wayland-devel wayland-protocols-devel glib2-devel libX11-devel libXfixes-devel pkg-config gcc
+```
+
+#### Dependencies (Ubuntu/Debian)
+
+```bash
+sudo apt install libwayland-dev wayland-protocols libglib2.0-dev libx11-dev libxfixes-dev pkg-config build-essential
+```
+
+#### Dependencies (Arch Linux)
+
+```bash
+sudo pacman -S wayland wayland-protocols glib2 libx11 libxfixes pkgconf base-devel
+```
 
 ### Building from Source
 
@@ -57,24 +89,6 @@ cargo build --release
 
 # Install (optional)
 sudo cp target/release/demonhide /usr/local/bin/
-```
-
-### Dependencies (Fedora/RHEL)
-
-```bash
-sudo dnf install wayland-devel wayland-protocols-devel glib2-devel libX11-devel libXfixes-devel
-```
-
-### Dependencies (Ubuntu/Debian)
-
-```bash
-sudo apt install libwayland-dev wayland-protocols libglib2.0-dev libx11-dev libxfixes-dev
-```
-
-### Dependencies (Arch Linux)
-
-```bash
-sudo pacman -S wayland wayland-protocols glib2 libx11 libxfixes
 ```
 
 ## Usage
