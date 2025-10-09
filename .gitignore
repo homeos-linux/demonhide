@@ -1,1 +1,8 @@
 target
+# Tito build artifacts
+/tmp/tito/
+*.rpm
+*.src.rpm
+build/
+# RPM development
+rpmbuild/

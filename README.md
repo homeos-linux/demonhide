@@ -91,6 +91,37 @@ cargo build --release
 sudo cp target/release/demonhide /usr/local/bin/
 ```
 
+### Building RPM Packages (Fedora)
+
+For Fedora users, you can build RPM packages using Tito:
+
+```bash
+# Install Tito and RPM build tools
+sudo dnf install tito rpm-build rpmdevtools
+
+# Set up RPM build environment
+rpmdev-setuptree
+
+# Build RPM packages
+make tito-build
+
+# Or build just source RPM
+make srpm
+
+# Test build without tagging
+make test-build
+```
+
+#### Available Make Targets
+
+- `make help` - Show available commands
+- `make tito-tag` - Tag a new release
+- `make tito-build` - Build RPM packages
+- `make srpm` - Build source RPM only
+- `make test-build` - Test build without tagging
+- `make clean` - Clean build artifacts
+- `make dev-deps` - Install development dependencies
+
 ## Usage
 
 ### Manual Execution

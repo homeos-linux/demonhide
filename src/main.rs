@@ -459,6 +459,34 @@ impl PointerLockDaemon {
 }
 
 fn main() {
+    // Simple argument parsing for --help and --version
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "--help" | "-h" => {
+                println!("DemonHide v{}", env!("CARGO_PKG_VERSION"));
+                println!("Automatic pointer constraint daemon for XWayland fullscreen applications");
+                println!();
+                println!("USAGE:");
+                println!("    {} [OPTIONS]", args[0]);
+                println!();
+                println!("OPTIONS:");
+                println!("    -h, --help       Print this help message");
+                println!("    -V, --version    Print version information");
+                return;
+            }
+            "--version" | "-V" => {
+                println!("{}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            _ => {
+                eprintln!("Unknown argument: {}", args[1]);
+                eprintln!("Use --help for usage information");
+                std::process::exit(1);
+            }
+        }
+    }
+
     println!("Starting demonhide daemon...");
 
     let daemon = match PointerLockDaemon::new() {
