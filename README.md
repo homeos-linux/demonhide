@@ -82,7 +82,7 @@ sudo pacman -S wayland wayland-protocols glib2 libx11 libxfixes pkgconf base-dev
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/homeos-linux/demonhide
 cd demonhide
 
 # Build release version
