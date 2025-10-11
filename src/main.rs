@@ -439,7 +439,7 @@ impl PointerLockDaemon {
                                         "Starting cursor warping thread to ({}, {})",
                                         center_x, center_y
                                     );
-                                }   
+                                }
                                 while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     x11::xlib::XWarpPointer(
                                         display, 0, root, 0, 0, 0, 0, center_x, center_y,
