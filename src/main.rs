@@ -434,9 +434,11 @@ impl PointerLockDaemon {
                                 let center_x = center.0;
                                 let center_y = center.1;
                                 while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                                    x11::xlib::XWarpPointer(display, 0, root, 0, 0, 0, 0, center_x, center_y);
+                                    x11::xlib::XWarpPointer(
+                                        display, 0, root, 0, 0, 0, 0, center_x, center_y,
+                                    );
                                     x11::xlib::XFlush(display);
-                                    std::thread::sleep(Duration::from_millis(10));
+                                    std::thread::sleep(Duration::from_millis(250));
                                 }
                                 x11::xlib::XCloseDisplay(display);
                             }
