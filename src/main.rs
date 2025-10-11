@@ -360,6 +360,28 @@ impl PointerLockDaemon {
         should_lock_pointer()
     }
 
+    fn get_wayland_surface_center(&self) -> Option<(i32, i32)> {
+        if let Some(app_data) = &self.app_data {
+            if let Some(surface) = &app_data.surface {
+                // Try to get the surface size and scale from Wayland
+                // This is a simplified approach; for full multi-output support, you would need to enumerate outputs
+                // and get the geometry and scale for the output the surface is on.
+                // For now, we assume scale=1 and use a default size if not available.
+                // You may want to use wayland-client's output management protocols for more advanced setups.
+                let width = std::env::var("WAYLAND_SCREEN_WIDTH").ok()
+                    .and_then(|w| w.parse::<i32>().ok()).unwrap_or(1920);
+                let height = std::env::var("WAYLAND_SCREEN_HEIGHT").ok()
+                    .and_then(|h| h.parse::<i32>().ok()).unwrap_or(1080);
+                let scale = std::env::var("WAYLAND_SCREEN_SCALE").ok()
+                    .and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+                let center_x = (width * scale) / 2;
+                let center_y = (height * scale) / 2;
+                return Some((center_x, center_y));
+            }
+        }
+        None
+    }
+
     fn lock_pointer(&mut self) {
         // Prevent multiple lock attempts
         if self.is_locked {
@@ -397,6 +419,7 @@ impl PointerLockDaemon {
                         // Start cursor warping thread
                         let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                         let stop_flag_clone = stop_flag.clone();
+                        let center = self.get_wayland_surface_center().unwrap_or((960, 540));
                         self.warp_stop = Some(stop_flag.clone());
                         self.warp_thread = Some(std::thread::spawn(move || {
                             use std::time::Duration;
@@ -408,10 +431,8 @@ impl PointerLockDaemon {
                                 }
                                 let screen = x11::xlib::XDefaultScreen(display);
                                 let root = x11::xlib::XRootWindow(display, screen);
-                                let width = x11::xlib::XDisplayWidth(display, screen);
-                                let height = x11::xlib::XDisplayHeight(display, screen);
-                                let center_x = width / 2;
-                                let center_y = height / 2;
+                                let center_x = center.0;
+                                let center_y = center.1;
                                 while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     x11::xlib::XWarpPointer(display, 0, root, 0, 0, 0, 0, center_x, center_y);
                                     x11::xlib::XFlush(display);
