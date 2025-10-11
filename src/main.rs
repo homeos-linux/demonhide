@@ -362,7 +362,7 @@ impl PointerLockDaemon {
 
     fn get_wayland_surface_center(&self) -> Option<(i32, i32)> {
         if let Some(app_data) = &self.app_data {
-            if let Some(surface) = &app_data.surface {
+            if let Some(_surface) = &app_data.surface {
                 // Try to get the surface size and scale from Wayland
                 // This is a simplified approach; for full multi-output support, you would need to enumerate outputs
                 // and get the geometry and scale for the output the surface is on.
