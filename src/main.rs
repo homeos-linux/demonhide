@@ -278,6 +278,8 @@ struct PointerLockDaemon {
     app_data: Option<AppData>,
     event_queue: Option<wayland_client::EventQueue<AppData>>,
     is_locked: bool, // Track current lock state
+    warp_thread: Option<std::thread::JoinHandle<()>>, // Thread for warping cursor
+    warp_stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>, // Signal to stop warping
 }
 
 impl PointerLockDaemon {
@@ -334,6 +336,8 @@ impl PointerLockDaemon {
                     app_data: Some(app_data),
                     event_queue: Some(event_queue),
                     is_locked: false,
+                    warp_thread: None,
+                    warp_stop: None,
                 })
             }
             Err(e) => {
@@ -345,6 +349,8 @@ impl PointerLockDaemon {
                     app_data: None,
                     event_queue: None,
                     is_locked: false,
+                    warp_thread: None,
+                    warp_stop: None,
                 })
             }
         }
@@ -359,7 +365,6 @@ impl PointerLockDaemon {
         if self.is_locked {
             return;
         }
-
         if let (Some(app_data), Some(event_queue)) = (&mut self.app_data, &mut self.event_queue) {
             if let (Some(pointer_constraints), Some(pointer), Some(surface)) = (
                 &app_data.pointer_constraints,
@@ -370,11 +375,9 @@ impl PointerLockDaemon {
                 if app_data.locked_pointer.is_some() {
                     return;
                 }
-
                 println!(
                     "🔒 Locking pointer for XWayland fullscreen application with hidden cursor"
                 );
-
                 // Lock the pointer to our surface
                 let locked_pointer = pointer_constraints.lock_pointer(
                     surface,
@@ -384,19 +387,45 @@ impl PointerLockDaemon {
                     &event_queue.handle(),
                     (),
                 );
-
                 // Store the locked pointer
                 app_data.locked_pointer = Some(locked_pointer);
                 self.is_locked = true;
-
                 // Process events to handle the lock response
                 match event_queue.dispatch_pending(app_data) {
                     Ok(_) => {
                         println!("✅ Pointer lock request sent successfully");
+                        // Start cursor warping thread
+                        let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let stop_flag_clone = stop_flag.clone();
+                        self.warp_stop = Some(stop_flag.clone());
+                        self.warp_thread = Some(std::thread::spawn(move || {
+                            use std::time::Duration;
+                            unsafe {
+                                let display = x11::xlib::XOpenDisplay(std::ptr::null());
+                                if display.is_null() {
+                                    eprintln!("Could not open X display for warping");
+                                    return;
+                                }
+                                let screen = x11::xlib::XDefaultScreen(display);
+                                let root = x11::xlib::XRootWindow(display, screen);
+                                let width = x11::xlib::XDisplayWidth(display, screen);
+                                let height = x11::xlib::XDisplayHeight(display, screen);
+                                let center_x = width / 2;
+                                let center_y = height / 2;
+                                while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                    x11::xlib::XWarpPointer(display, 0, root, 0, 0, 0, 0, center_x, center_y);
+                                    x11::xlib::XFlush(display);
+                                    std::thread::sleep(Duration::from_millis(10));
+                                }
+                                x11::xlib::XCloseDisplay(display);
+                            }
+                        }));
                     }
                     Err(_e) => {
                         println!("❌ Error processing pointer lock events: {}", _e);
                         self.is_locked = false; // Reset on error
+                        self.warp_stop = None;
+                        self.warp_thread = None;
                     }
                 }
             } else {
@@ -424,13 +453,19 @@ impl PointerLockDaemon {
         if !self.is_locked {
             return;
         }
-
         if let Some(app_data) = &mut self.app_data {
             if let Some(locked_pointer) = app_data.locked_pointer.take() {
                 println!("🔓 Unlocking pointer...");
                 locked_pointer.destroy();
                 self.is_locked = false;
-
+                // Stop cursor warping thread
+                if let Some(stop_flag) = &self.warp_stop {
+                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                if let Some(handle) = self.warp_thread.take() {
+                    let _ = handle.join();
+                }
+                self.warp_stop = None;
                 // Process events to handle the unlock (non-blocking)
                 if let Some(event_queue) = &mut self.event_queue {
                     match event_queue.dispatch_pending(app_data) {
