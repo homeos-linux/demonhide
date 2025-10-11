@@ -433,6 +433,13 @@ impl PointerLockDaemon {
                                 let root = x11::xlib::XRootWindow(display, screen);
                                 let center_x = center.0;
                                 let center_y = center.1;
+                                #[cfg(debug_assertions)]
+                                {
+                                    println!(
+                                        "Starting cursor warping thread to ({}, {})",
+                                        center_x, center_y
+                                    );
+                                }   
                                 while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     x11::xlib::XWarpPointer(
                                         display, 0, root, 0, 0, 0, 0, center_x, center_y,
