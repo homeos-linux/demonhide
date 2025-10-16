@@ -1,7 +1,8 @@
 use glib::MainLoop;
 use std::ptr;
 use wayland_client::protocol::{
-    wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shell, wl_shell_surface, wl_surface,
+    wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shell, wl_shell_surface,
+    wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle};
 use wayland_protocols::wp::pointer_constraints::zv1::client::{
@@ -97,6 +98,10 @@ struct AppData {
     surface: Option<wl_surface::WlSurface>,
     shell: Option<wl_shell::WlShell>,
     locked_pointer: Option<zwp_locked_pointer_v1::ZwpLockedPointerV1>,
+    // Primary output info: (width, height, scale)
+    output_info: Option<std::sync::Arc<std::sync::Mutex<Option<(i32, i32, i32)>>>>,
+    // Keep wl_output objects alive so we receive their events
+    outputs: Vec<wl_output::WlOutput>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
@@ -134,6 +139,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                         registry.bind::<wl_compositor::WlCompositor, _, _>(name, 4, qh, ());
                     println!("Bound compositor interface");
                     state.compositor = Some(compositor);
+                }
+                "wl_output" => {
+                    // Bind wl_output and keep the object to receive events
+                    let output = registry.bind::<wl_output::WlOutput, _, _>(name, 3, qh, ());
+                    println!("Bound wl_output interface");
+                    state.outputs.push(output);
                 }
                 "wl_shell" => {
                     let shell = registry.bind::<wl_shell::WlShell, _, _>(name, 1, qh, ());
@@ -239,6 +250,55 @@ impl Dispatch<wl_seat::WlSeat, ()> for AppData {
     }
 }
 
+impl Dispatch<wl_output::WlOutput, ()> for AppData {
+    fn event(
+        state: &mut Self,
+        _output: &wl_output::WlOutput,
+        event: wl_output::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<AppData>,
+    ) {
+        match event {
+            wl_output::Event::Geometry {
+                x: _,
+                y: _,
+                physical_width: _,
+                physical_height: _,
+                subpixel: _,
+                make: _,
+                model: _,
+                transform: _,
+            } => {
+                // geometry event doesn't provide logical size, skip
+            }
+            wl_output::Event::Mode { flags: _, width, height, refresh: _ } => {
+                if let Some(out_info) = &state.output_info {
+                    if let Ok(mut guard) = out_info.lock() {
+                        // default scale 1 for now
+                        let scale = guard.map(|(_, _, s)| s).unwrap_or(1);
+                        *guard = Some((width as i32, height as i32, scale));
+                    }
+                }
+            }
+            wl_output::Event::Scale { factor } => {
+                if let Some(out_info) = &state.output_info {
+                    if let Ok(mut guard) = out_info.lock() {
+                        match *guard {
+                            Some((w, h, _)) => *guard = Some((w, h, factor as i32)),
+                            None => *guard = Some((1920, 1080, factor as i32)),
+                        }
+                    }
+                }
+            }
+            wl_output::Event::Done => {
+                // Output done; nothing special to do
+            }
+            _ => {}
+        }
+    }
+}
+
 impl Dispatch<wl_pointer::WlPointer, ()> for AppData {
     fn event(
         _: &mut Self,
@@ -297,6 +357,8 @@ impl PointerLockDaemon {
                     surface: None,
                     shell: None,
                     locked_pointer: None,
+                    output_info: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+                    outputs: Vec::new(),
                 };
 
                 let display = conn.display();
@@ -360,20 +422,73 @@ impl PointerLockDaemon {
         should_lock_pointer()
     }
 
+    // Read GNOME's monitors.xml file and try to extract primary monitor width/height/scale
+    fn read_gnome_monitors_xml() -> Option<(i32, i32, i32)> {
+        use std::fs;
+        let home = std::env::var("HOME").ok()?;
+        let path = format!("{}/.config/monitors.xml", home);
+        let contents = fs::read_to_string(path).ok()?;
+
+        // Find the first <monitor ...>...</monitor> block (or logicalmonitor) and extract width/height/scale
+        let lower = contents.to_lowercase();
+        let idx = lower.find("<monitor").or_else(|| lower.find("<logicalmonitor"))?;
+        let sub = &lower[idx..];
+        let end = sub.find("</monitor>").or_else(|| sub.find("</logicalmonitor>"));
+        let snippet = if let Some(e) = end { &sub[..e] } else { sub };
+
+        // Helper to extract integer from tags like <width>1234</width>
+        fn extract(tag: &str, s: &str) -> Option<i32> {
+            let open = format!("<{}>", tag);
+            let close = format!("</{}>", tag);
+            let a = s.find(&open)? + open.len();
+            let b = s[a..].find(&close)? + a;
+            s[a..b].trim().parse::<i32>().ok()
+        }
+
+        let width = extract("width", snippet).or_else(|| extract("modewidth", snippet));
+        let height = extract("height", snippet).or_else(|| extract("modeheight", snippet));
+        let scale = extract("scale", snippet).or(Some(1));
+
+        match (width, height, scale) {
+            (Some(w), Some(h), Some(s)) => Some((w, h, s)),
+            _ => None,
+        }
+    }
+
     fn get_wayland_surface_center(&self) -> Option<(i32, i32)> {
         if let Some(app_data) = &self.app_data {
             if let Some(_surface) = &app_data.surface {
-                // Try to get the surface size and scale from Wayland
-                // This is a simplified approach; for full multi-output support, you would need to enumerate outputs
-                // and get the geometry and scale for the output the surface is on.
-                // For now, we assume scale=1 and use a default size if not available.
-                // You may want to use wayland-client's output management protocols for more advanced setups.
-                let width = std::env::var("WAYLAND_SCREEN_WIDTH").ok()
-                    .and_then(|w| w.parse::<i32>().ok()).unwrap_or(1920);
-                let height = std::env::var("WAYLAND_SCREEN_HEIGHT").ok()
-                    .and_then(|h| h.parse::<i32>().ok()).unwrap_or(1080);
-                let scale = std::env::var("WAYLAND_SCREEN_SCALE").ok()
-                    .and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+                // 1) Prefer GNOME settings if available (~/.config/monitors.xml)
+                if let Some((w, h, scale)) = Self::read_gnome_monitors_xml() {
+                    let center_x = (w * scale) / 2;
+                    let center_y = (h * scale) / 2;
+                    return Some((center_x, center_y));
+                }
+
+                // 2) Prefer Wayland wl_output info collected earlier
+                if let Some(out_info) = &app_data.output_info {
+                    if let Ok(guard) = out_info.lock() {
+                        if let Some((w, h, scale)) = *guard {
+                            let center_x = (w * scale) / 2;
+                            let center_y = (h * scale) / 2;
+                            return Some((center_x, center_y));
+                        }
+                    }
+                }
+
+                // 3) Fallback to environment variables (for older setups) or defaults
+                let width = std::env::var("WAYLAND_SCREEN_WIDTH")
+                    .ok()
+                    .and_then(|w| w.parse::<i32>().ok())
+                    .unwrap_or(1920);
+                let height = std::env::var("WAYLAND_SCREEN_HEIGHT")
+                    .ok()
+                    .and_then(|h| h.parse::<i32>().ok())
+                    .unwrap_or(1080);
+                let scale = std::env::var("WAYLAND_SCREEN_SCALE")
+                    .ok()
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(1);
                 let center_x = (width * scale) / 2;
                 let center_y = (height * scale) / 2;
                 return Some((center_x, center_y));
