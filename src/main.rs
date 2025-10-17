@@ -27,6 +27,67 @@ fn should_lock_pointer() -> bool {
 
 fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
     unsafe {
+        use std::os::raw::{c_int, c_long, c_uchar, c_ulong};
+
+        // Helper: check whether the cursor is hidden via XFixes
+        let is_cursor_hidden = |display: *mut x11::xlib::Display| -> bool {
+            let mut event_base: c_int = 0;
+            let mut error_base: c_int = 0;
+            if x11::xfixes::XFixesQueryExtension(display, &mut event_base, &mut error_base) == 0 {
+                return false; // cannot query cursor
+            }
+            let cursor_image = x11::xfixes::XFixesGetCursorImage(display);
+            if cursor_image.is_null() {
+                return true; // assume hidden if we can't get image
+            }
+            let cursor = &*cursor_image;
+            let hidden = cursor.width <= 1 && cursor.height <= 1;
+            x11::xlib::XFree(cursor_image as *mut _);
+            hidden
+        };
+
+        // Helper: check STEAM_GAME atom on a window
+        let is_steam_game_window = |display: *mut x11::xlib::Display, w: x11::xlib::Window| -> bool {
+            // STEAM_GAME atom name
+            let atom_name = std::ffi::CString::new("STEAM_GAME").unwrap();
+            let atom = x11::xlib::XInternAtom(display, atom_name.as_ptr(), 0);
+            if atom == 0 {
+                return false;
+            }
+            let mut actual_type: x11::xlib::Atom = 0;
+            let mut actual_format: c_int = 0;
+            let mut nitems: c_ulong = 0;
+            let mut bytes_after: c_ulong = 0;
+            let mut prop: *mut c_uchar = std::ptr::null_mut();
+            // Request 1 item of CARDINAL
+            let res = x11::xlib::XGetWindowProperty(
+                display,
+                w,
+                atom,
+                0,
+                1,
+                0,
+                x11::xlib::XA_CARDINAL,
+                &mut actual_type,
+                &mut actual_format,
+                &mut nitems,
+                &mut bytes_after,
+                &mut prop,
+            );
+            if res != 0 || prop.is_null() || nitems == 0 {
+                if !prop.is_null() {
+                    x11::xlib::XFree(prop as *mut _);
+                }
+                return false;
+            }
+            // Interpret returned data as unsigned long
+            let val_ptr = prop as *mut c_ulong;
+            let value = *val_ptr as u64;
+            x11::xlib::XFree(prop as *mut _);
+            // Compare to the provided STEAM_GAME value
+            value == 2073850u64
+        };
+
         let display = x11::xlib::XOpenDisplay(ptr::null());
         if display.is_null() {
             return false;
@@ -38,8 +99,8 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
         let screen_height = x11::xlib::XDisplayHeight(display, screen);
 
         // Get the currently focused window
-        let mut focus_window = 0;
-        let mut revert_to = 0;
+        let mut focus_window: x11::xlib::Window = 0;
+        let mut revert_to: c_int = 0;
         x11::xlib::XGetInputFocus(display, &mut focus_window, &mut revert_to);
 
         if focus_window == 0 || focus_window == root {
@@ -47,8 +108,15 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
             return false;
         }
 
+        // Check if steam game first (no fullscreen requirement)
+        let cursor_hidden = is_cursor_hidden(display);
+        if is_steam_game_window(display, focus_window) && cursor_hidden {
+            x11::xlib::XCloseDisplay(display);
+            return true;
+        }
+
         // Get window attributes
-        let mut window_attrs = std::mem::zeroed();
+        let mut window_attrs: x11::xlib::XWindowAttributes = std::mem::zeroed();
         if x11::xlib::XGetWindowAttributes(display, focus_window, &mut window_attrs) == 0 {
             x11::xlib::XCloseDisplay(display);
             return false;
@@ -58,36 +126,14 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
         let is_fullscreen =
             window_attrs.width >= screen_width && window_attrs.height >= screen_height;
 
-        if !is_fullscreen {
+        // If fullscreen and cursor hidden, return true
+        if is_fullscreen && cursor_hidden {
             x11::xlib::XCloseDisplay(display);
-            return false;
-        }
-
-        // Check if cursor is hidden using XFixes
-        let mut event_base = 0;
-        let mut error_base = 0;
-
-        if x11::xfixes::XFixesQueryExtension(display, &mut event_base, &mut error_base) == 0 {
-            x11::xlib::XCloseDisplay(display);
-            return false; // XFixes not available
-        }
-
-        let cursor_image = x11::xfixes::XFixesGetCursorImage(display);
-        let cursor_hidden = if cursor_image.is_null() {
-            true // If we can't get cursor info, assume it might be hidden
-        } else {
-            let cursor = &*cursor_image;
-            // Cursor is considered hidden if it has no dimensions or is 1x1 (common for hidden cursors)
-            cursor.width <= 1 && cursor.height <= 1
-        };
-
-        if !cursor_image.is_null() {
-            x11::xlib::XFree(cursor_image as *mut _);
+            return true;
         }
 
         x11::xlib::XCloseDisplay(display);
-
-        cursor_hidden
+        false
     }
 }
 
