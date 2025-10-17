@@ -145,6 +145,8 @@ struct AppData {
     surface: Option<wl_surface::WlSurface>,
     shell: Option<wl_shell::WlShell>,
     locked_pointer: Option<zwp_locked_pointer_v1::ZwpLockedPointerV1>,
+    // Set to true when compositor acknowledges the locked pointer via Locked event
+    locked_acquired: bool,
     // Per-output info: (wl_output, Arc<Mutex<Option<(x,y,width,height,scale)>>>)
     outputs: Vec<(wl_output::WlOutput, std::sync::Arc<std::sync::Mutex<Option<(i32, i32, i32, i32, i32)>>>)>,
 }
@@ -365,11 +367,13 @@ impl Dispatch<zwp_locked_pointer_v1::ZwpLockedPointerV1, ()> for AppData {
         match event {
             zwp_locked_pointer_v1::Event::Locked => {
                 info!("🔒 Pointer successfully locked!");
+                state.locked_acquired = true;
             }
             zwp_locked_pointer_v1::Event::Unlocked => {
                 info!("🔓 Pointer unlocked");
                 // Clear the locked pointer when it's unlocked
                 state.locked_pointer = None;
+                state.locked_acquired = false;
             }
             _ => {}
         }
@@ -399,6 +403,7 @@ impl PointerLockDaemon {
                     surface: None,
                     shell: None,
                     locked_pointer: None,
+                    locked_acquired: false,
                     outputs: Vec::new(),
                 };
 
@@ -682,44 +687,53 @@ impl PointerLockDaemon {
                     &event_queue.handle(),
                     (),
                 );
-                // Store the locked pointer
+                // Store the locked pointer (we'll wait for the compositor to ACK with Locked event)
                 app_data.locked_pointer = Some(locked_pointer);
-                self.is_locked = true;
-                // Process events to handle the lock response
+                // Process events to handle the lock response which should set locked_acquired
                 match event_queue.dispatch_pending(app_data) {
                     Ok(_) => {
-                        info!("✅ Pointer lock request sent successfully");
-                        // Start cursor warping thread
-                        let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        let stop_flag_clone = stop_flag.clone();
-                        let center = self.get_wayland_surface_center().unwrap_or((960, 540));
-                        self.warp_stop = Some(stop_flag.clone());
-                        self.warp_thread = Some(std::thread::spawn(move || {
-                            use std::time::Duration;
-                            unsafe {
-                                let display = x11::xlib::XOpenDisplay(std::ptr::null());
-                                if display.is_null() {
-                                    error!("Could not open X display for warping");
-                                    return;
-                                }
-                                let screen = x11::xlib::XDefaultScreen(display);
-                                let root = x11::xlib::XRootWindow(display, screen);
-                                let center_x = center.0;
-                                let center_y = center.1;
+                        info!("✅ Pointer lock request sent, checking compositor acknowledgement...");
+                        // If compositor acknowledged the lock (Locked event handler sets this), start warping
+                        if app_data.locked_acquired {
+                            info!("✅ Compositor acknowledged pointer lock");
+                            self.is_locked = true;
+                            // Start cursor warping thread
+                            let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                            let stop_flag_clone = stop_flag.clone();
+                            let center = self.get_wayland_surface_center().unwrap_or((960, 540));
+                            self.warp_stop = Some(stop_flag.clone());
+                            self.warp_thread = Some(std::thread::spawn(move || {
+                                use std::time::Duration;
+                                unsafe {
+                                    let display = x11::xlib::XOpenDisplay(std::ptr::null());
+                                    if display.is_null() {
+                                        error!("Could not open X display for warping");
+                                        return;
+                                    }
+                                    let screen = x11::xlib::XDefaultScreen(display);
+                                    let root = x11::xlib::XRootWindow(display, screen);
+                                    let center_x = center.0;
+                                    let center_y = center.1;
                                     #[cfg(debug_assertions)]
-                                {
-                                    debug!("Starting cursor warping thread to ({}, {})", center_x, center_y);
+                                    {
+                                        debug!("Starting cursor warping thread to ({}, {})", center_x, center_y);
+                                    }
+                                    while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                        x11::xlib::XWarpPointer(
+                                            display, 0, root, 0, 0, 0, 0, center_x, center_y,
+                                        );
+                                        x11::xlib::XFlush(display);
+                                        std::thread::sleep(Duration::from_millis(250));
+                                    }
+                                    x11::xlib::XCloseDisplay(display);
                                 }
-                                while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                                    x11::xlib::XWarpPointer(
-                                        display, 0, root, 0, 0, 0, 0, center_x, center_y,
-                                    );
-                                    x11::xlib::XFlush(display);
-                                    std::thread::sleep(Duration::from_millis(250));
-                                }
-                                x11::xlib::XCloseDisplay(display);
-                            }
-                        }));
+                            }));
+                        } else {
+                            // Compositor did not acknowledge the lock yet; undo and log
+                            warn!("Compositor did not acknowledge pointer lock (no Locked event received)");
+                            app_data.locked_pointer = None;
+                            app_data.locked_acquired = false;
+                        }
                     }
                     Err(_e) => {
                         error!("❌ Error processing pointer lock events: {}", _e);
@@ -789,6 +803,55 @@ impl PointerLockDaemon {
             self.lock_pointer();
         } else if !should_lock && self.is_locked {
             self.unlock_pointer();
+        }
+        // If the compositor acknowledged the locked pointer (Locked event) but we
+        // haven't yet started the warp thread / marked is_locked, do so now.
+        self.start_warp_if_needed();
+    }
+
+    // Start the warp thread when compositor ACK'ed the lock (locked_acquired == true)
+    fn start_warp_if_needed(&mut self) {
+        if self.is_locked {
+            return;
+        }
+        if let Some(app_data) = &self.app_data {
+            if app_data.locked_acquired {
+                if app_data.locked_pointer.is_some() {
+                    info!("✅ Starting warp after compositor acknowledgement");
+                    // Start cursor warping thread
+                    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let stop_flag_clone = stop_flag.clone();
+                    let center = self.get_wayland_surface_center().unwrap_or((960, 540));
+                    self.warp_stop = Some(stop_flag.clone());
+                    self.warp_thread = Some(std::thread::spawn(move || {
+                        use std::time::Duration;
+                        unsafe {
+                            let display = x11::xlib::XOpenDisplay(std::ptr::null());
+                            if display.is_null() {
+                                error!("Could not open X display for warping");
+                                return;
+                            }
+                            let screen = x11::xlib::XDefaultScreen(display);
+                            let root = x11::xlib::XRootWindow(display, screen);
+                            let center_x = center.0;
+                            let center_y = center.1;
+                            #[cfg(debug_assertions)]
+                            {
+                                debug!("Starting cursor warping thread to ({}, {})", center_x, center_y);
+                            }
+                            while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                x11::xlib::XWarpPointer(
+                                    display, 0, root, 0, 0, 0, 0, center_x, center_y,
+                                );
+                                x11::xlib::XFlush(display);
+                                std::thread::sleep(Duration::from_millis(250));
+                            }
+                            x11::xlib::XCloseDisplay(display);
+                        }
+                    }));
+                    self.is_locked = true;
+                }
+            }
         }
     }
 }
