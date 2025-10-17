@@ -27,7 +27,7 @@ fn should_lock_pointer() -> bool {
 
 fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
     unsafe {
-        use std::os::raw::{c_int, c_long, c_uchar, c_ulong};
+    use std::os::raw::{c_int, c_uchar, c_ulong};
 
         // Helper: check whether the cursor is hidden via XFixes
         let is_cursor_hidden = |display: *mut x11::xlib::Display| -> bool {
