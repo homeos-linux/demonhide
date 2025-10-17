@@ -1,4 +1,5 @@
 use glib::MainLoop;
+use log::{debug, info, warn, error};
 use std::ptr;
 use wayland_client::protocol::{
     wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shell, wl_shell_surface,
@@ -98,10 +99,8 @@ struct AppData {
     surface: Option<wl_surface::WlSurface>,
     shell: Option<wl_shell::WlShell>,
     locked_pointer: Option<zwp_locked_pointer_v1::ZwpLockedPointerV1>,
-    // Primary output info: (width, height, scale)
-    output_info: Option<std::sync::Arc<std::sync::Mutex<Option<(i32, i32, i32)>>>>,
-    // Keep wl_output objects alive so we receive their events
-    outputs: Vec<wl_output::WlOutput>,
+    // Per-output info: (wl_output, Arc<Mutex<Option<(x,y,width,height,scale)>>>)
+    outputs: Vec<(wl_output::WlOutput, std::sync::Arc<std::sync::Mutex<Option<(i32, i32, i32, i32, i32)>>>)>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
@@ -126,29 +125,30 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                         qh,
                         (),
                     );
-                    println!("Bound pointer constraints interface");
+                    debug!("Bound pointer constraints interface");
                     state.pointer_constraints = Some(pointer_constraints);
                 }
                 "wl_seat" => {
                     let seat = registry.bind::<wl_seat::WlSeat, _, _>(name, 1, qh, ());
-                    println!("Bound seat interface - requesting capabilities...");
+                    debug!("Bound seat interface - requesting capabilities...");
                     state.seat = Some(seat);
                 }
                 "wl_compositor" => {
                     let compositor =
                         registry.bind::<wl_compositor::WlCompositor, _, _>(name, 4, qh, ());
-                    println!("Bound compositor interface");
+                    debug!("Bound compositor interface");
                     state.compositor = Some(compositor);
                 }
                 "wl_output" => {
-                    // Bind wl_output and keep the object to receive events
+                    // Bind wl_output and keep the object and an associated info slot to receive events
                     let output = registry.bind::<wl_output::WlOutput, _, _>(name, 3, qh, ());
-                    println!("Bound wl_output interface");
-                    state.outputs.push(output);
+                    let info = std::sync::Arc::new(std::sync::Mutex::new(None));
+                    debug!("Bound wl_output interface");
+                    state.outputs.push((output, info));
                 }
                 "wl_shell" => {
                     let shell = registry.bind::<wl_shell::WlShell, _, _>(name, 1, qh, ());
-                    println!("Bound shell interface");
+                    debug!("Bound shell interface");
                     state.shell = Some(shell);
                 }
                 _ => {}
@@ -228,23 +228,23 @@ impl Dispatch<wl_seat::WlSeat, ()> for AppData {
         qh: &QueueHandle<AppData>,
     ) {
         if let wl_seat::Event::Capabilities { capabilities } = event {
-            println!("Seat capabilities received: {:?}", capabilities);
+                debug!("Seat capabilities received: {:?}", capabilities);
 
             // Try different ways to check for pointer capability
             let caps_value: u32 = capabilities.into();
             let pointer_bit = u32::from(wl_seat::Capability::Pointer);
 
-            println!(
-                "Capabilities value: {}, Pointer bit: {}",
-                caps_value, pointer_bit
-            );
+                debug!(
+                    "Capabilities value: {}, Pointer bit: {}",
+                    caps_value, pointer_bit
+                );
 
             if (caps_value & pointer_bit) != 0 {
                 let pointer = seat.get_pointer(qh, ());
-                println!("Got pointer capability and created pointer device");
+                info!("Got pointer capability and created pointer device");
                 state.pointer = Some(pointer);
             } else {
-                println!("No pointer capability available");
+                warn!("No pointer capability available");
             }
         }
     }
@@ -259,44 +259,35 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
         _: &Connection,
         _: &QueueHandle<AppData>,
     ) {
-        match event {
-            wl_output::Event::Geometry {
-                x: _,
-                y: _,
-                physical_width: _,
-                physical_height: _,
-                subpixel: _,
-                make: _,
-                model: _,
-                transform: _,
-            } => {
-                // geometry event doesn't provide logical size, skip
-            }
-            wl_output::Event::Mode { flags: _, width, height, refresh: _ } => {
-                if let Some(out_info) = &state.output_info {
-                    if let Ok(mut guard) = out_info.lock() {
-                        // default scale 1 for now
-                        let scale = guard.map(|(_, _, s)| s).unwrap_or(1);
-                        *guard = Some((width as i32, height as i32, scale));
-                        println!("[debug] wl_output mode: {}x{} scale={}", width, height, scale);
-                    }
-                }
-            }
-            wl_output::Event::Scale { factor } => {
-                if let Some(out_info) = &state.output_info {
-                    if let Ok(mut guard) = out_info.lock() {
-                        match *guard {
-                            Some((w, h, _)) => *guard = Some((w, h, factor as i32)),
-                            None => *guard = Some((1920, 1080, factor as i32)),
+        // Find the matching stored output and update its info
+        for (stored_output, info_arc) in &state.outputs {
+            if stored_output == _output {
+                if let Ok(mut guard) = info_arc.lock() {
+                    match event {
+                        wl_output::Event::Geometry { x, y, physical_width: _, physical_height: _, subpixel: _, make: _, model: _, transform: _ } => {
+                            // store x,y (position); other fields handled elsewhere
+                            let (w, h, scale) = guard.unwrap_or((0, 0, 1));
+                            *guard = Some((x as i32, y as i32, w, h, scale));
+                            debug!("wl_output geometry: x={} y={}", x, y);
                         }
-                        println!("[debug] wl_output scale event: factor={}", factor);
+                        wl_output::Event::Mode { flags: _, width, height, refresh: _ } => {
+                            let (x, y, _w, _h, scale) = guard.unwrap_or((0, 0, 0, 0, 1));
+                            *guard = Some((x, y, width as i32, height as i32, scale));
+                            debug!("wl_output mode: {}x{} (stored pos {}x{}) scale={}", width, height, x, y, scale);
+                        }
+                        wl_output::Event::Scale { factor } => {
+                            let (x, y, w, h, _old_scale) = guard.unwrap_or((0, 0, 0, 0, 1));
+                            *guard = Some((x, y, w, h, factor as i32));
+                            debug!("wl_output scale event: factor={}", factor);
+                        }
+                        wl_output::Event::Done => {
+                            // nothing special
+                        }
+                        _ => {}
                     }
                 }
+                break;
             }
-            wl_output::Event::Done => {
-                // Output done; nothing special to do
-            }
-            _ => {}
         }
     }
 }
@@ -324,10 +315,10 @@ impl Dispatch<zwp_locked_pointer_v1::ZwpLockedPointerV1, ()> for AppData {
     ) {
         match event {
             zwp_locked_pointer_v1::Event::Locked => {
-                println!("🔒 Pointer successfully locked!");
+                info!("🔒 Pointer successfully locked!");
             }
             zwp_locked_pointer_v1::Event::Unlocked => {
-                println!("🔓 Pointer unlocked");
+                info!("🔓 Pointer unlocked");
                 // Clear the locked pointer when it's unlocked
                 state.locked_pointer = None;
             }
@@ -349,7 +340,7 @@ impl PointerLockDaemon {
         // Try to connect to Wayland
         match Connection::connect_to_env() {
             Ok(conn) => {
-                println!("Connected to Wayland display");
+                info!("Connected to Wayland display");
 
                 let mut app_data = AppData {
                     pointer_constraints: None,
@@ -359,7 +350,6 @@ impl PointerLockDaemon {
                     surface: None,
                     shell: None,
                     locked_pointer: None,
-                    output_info: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
                     outputs: Vec::new(),
                 };
 
@@ -375,26 +365,26 @@ impl PointerLockDaemon {
 
                 // Second roundtrip to get seat capabilities after binding
                 if app_data.seat.is_some() {
-                    println!("Doing second roundtrip to get seat capabilities...");
+                    debug!("Doing second roundtrip to get seat capabilities...");
                     event_queue.blocking_dispatch(&mut app_data)?;
                 }
 
                 // Create surface even without shell - just a basic surface for pointer locking
                 if let Some(compositor) = &app_data.compositor {
                     let surface = compositor.create_surface(&qh, ());
-                    println!("Created basic surface for pointer locking");
+                    debug!("Created basic surface for pointer locking");
 
                     // Commit the surface to make it "live"
                     surface.commit();
 
                     app_data.surface = Some(surface);
 
-                    println!("Surface committed and ready for pointer locking");
+                    debug!("Surface committed and ready for pointer locking");
                 } else {
-                    println!("Warning: Missing compositor, cannot create surface");
+                    warn!("Warning: Missing compositor, cannot create surface");
                 }
 
-                println!("Wayland protocols initialized successfully");
+                info!("Wayland protocols initialized successfully");
 
                 Ok(PointerLockDaemon {
                     app_data: Some(app_data),
@@ -429,51 +419,73 @@ impl PointerLockDaemon {
             if let Some(_surface) = &app_data.surface {
                 // 1) Try parsing GNOME monitors.xml into monitor list
                 if let Some(monitors) = Self::parse_gnome_monitors_list() {
-                    println!("[debug] parse_gnome_monitors_list returned {} monitors", monitors.len());
+                    debug!("parse_gnome_monitors_list returned {} monitors", monitors.len());
                     for (i, m) in monitors.iter().enumerate() {
-                        println!("[debug] monitor[{}] = x={} y={} w={} h={} scale={}", i, m.0, m.1, m.2, m.3, m.4);
+                        debug!("monitor[{}] = x={} y={} w={} h={} scale={}", i, m.0, m.1, m.2, m.3, m.4);
                     }
 
                     // If only one monitor, use its center
                     if monitors.len() == 1 {
                         let (x, y, w, h, scale) = monitors[0];
-                        println!("[debug] Single monitor detected, selecting center");
+                        debug!("Single monitor detected, selecting center");
                         return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
                     }
 
                     // If multiple monitors, try to get focused X11 window center and pick containing monitor
                     if let Some((fx, fy)) = Self::get_focused_x11_window_center() {
-                        println!("[debug] Focused X11 window center at {}x{}", fx, fy);
+                        debug!("Focused X11 window center at {}x{}", fx, fy);
                         for (mx, my, mw, mh, scale) in &monitors {
                             let rx = *mx;
                             let ry = *my;
                             let rw = *mw * *scale;
                             let rh = *mh * *scale;
                             let contains = fx >= rx && fx < rx + rw && fy >= ry && fy < ry + rh;
-                            println!("[debug] testing monitor rect x={} y={} w={} h={} contains={} ", rx, ry, rw, rh, contains);
+                            debug!("testing monitor rect x={} y={} w={} h={} contains={}", rx, ry, rw, rh, contains);
                             if contains {
-                                println!("[debug] Selected monitor containing focused point: x={} y={} w={} h={} scale={}", rx, ry, rw, rh, scale);
+                                debug!("Selected monitor containing focused point: x={} y={} w={} h={} scale={}", rx, ry, rw, rh, scale);
                                 return Some(((rw) / 2 + rx, (rh) / 2 + ry));
                             }
                         }
                     } else {
-                        println!("[debug] No focused X11 window center available to choose monitor");
+                        debug!("No focused X11 window center available to choose monitor");
                     }
 
                     // Fallback: use primary monitor (first)
                     let (x, y, w, h, scale) = monitors[0];
-                    println!("[debug] Falling back to primary monitor from monitors.xml");
+                    debug!("Falling back to primary monitor from monitors.xml");
                     return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
                 }
 
-                // 2) Prefer Wayland wl_output info collected earlier
-                if let Some(out_info) = &app_data.output_info {
-                    if let Ok(guard) = out_info.lock() {
-                        if let Some((w, h, scale)) = *guard {
-                            println!("[debug] Using wl_output info: w={} h={} scale={}", w, h, scale);
-                            let center_x = (w * scale) / 2;
-                            let center_y = (h * scale) / 2;
-                            return Some((center_x, center_y));
+                // 2) Prefer Wayland per-output info collected earlier
+                if !app_data.outputs.is_empty() {
+                    // Try to use focused X11 point to select the right output
+                    if let Some((fx, fy)) = Self::get_focused_x11_window_center() {
+                        for (_out, info_arc) in &app_data.outputs {
+                            if let Ok(guard) = info_arc.lock() {
+                                if let Some((ox, oy, ow, oh, scale)) = *guard {
+                                    let rw = ow * scale;
+                                    let rh = oh * scale;
+                                    let contains = fx >= ox && fx < ox + rw && fy >= oy && fy < oy + rh;
+                                    debug!("testing stored output x={} y={} w={} h={} scale={} contains={}", ox, oy, rw, rh, scale, contains);
+                                    if contains {
+                                        let center_x = ox + rw / 2;
+                                        let center_y = oy + rh / 2;
+                                        debug!("Selected stored output center {}x{}", center_x, center_y);
+                                        return Some((center_x, center_y));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // otherwise fallback to first output's center
+                    if let Some((_out, info_arc)) = app_data.outputs.get(0) {
+                        if let Ok(guard) = info_arc.lock() {
+                            if let Some((ox, oy, ow, oh, scale)) = *guard {
+                                let center_x = ox + (ow * scale) / 2;
+                                let center_y = oy + (oh * scale) / 2;
+                                debug!("Falling back to first stored output center {}x{}", center_x, center_y);
+                                return Some((center_x, center_y));
+                            }
                         }
                     }
                 }
@@ -596,9 +608,7 @@ impl PointerLockDaemon {
                 if app_data.locked_pointer.is_some() {
                     return;
                 }
-                println!(
-                    "🔒 Locking pointer for XWayland fullscreen application with hidden cursor"
-                );
+                info!("🔒 Locking pointer for XWayland fullscreen application with hidden cursor");
                 // Lock the pointer to our surface
                 let locked_pointer = pointer_constraints.lock_pointer(
                     surface,
@@ -614,7 +624,7 @@ impl PointerLockDaemon {
                 // Process events to handle the lock response
                 match event_queue.dispatch_pending(app_data) {
                     Ok(_) => {
-                        println!("✅ Pointer lock request sent successfully");
+                        info!("✅ Pointer lock request sent successfully");
                         // Start cursor warping thread
                         let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                         let stop_flag_clone = stop_flag.clone();
@@ -625,19 +635,16 @@ impl PointerLockDaemon {
                             unsafe {
                                 let display = x11::xlib::XOpenDisplay(std::ptr::null());
                                 if display.is_null() {
-                                    eprintln!("Could not open X display for warping");
+                                    error!("Could not open X display for warping");
                                     return;
                                 }
                                 let screen = x11::xlib::XDefaultScreen(display);
                                 let root = x11::xlib::XRootWindow(display, screen);
                                 let center_x = center.0;
                                 let center_y = center.1;
-                                #[cfg(debug_assertions)]
+                                    #[cfg(debug_assertions)]
                                 {
-                                    println!(
-                                        "Starting cursor warping thread to ({}, {})",
-                                        center_x, center_y
-                                    );
+                                    debug!("Starting cursor warping thread to ({}, {})", center_x, center_y);
                                 }
                                 while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     x11::xlib::XWarpPointer(
@@ -651,7 +658,7 @@ impl PointerLockDaemon {
                         }));
                     }
                     Err(_e) => {
-                        println!("❌ Error processing pointer lock events: {}", _e);
+                        error!("❌ Error processing pointer lock events: {}", _e);
                         self.is_locked = false; // Reset on error
                         self.warp_stop = None;
                         self.warp_thread = None;
@@ -661,16 +668,16 @@ impl PointerLockDaemon {
                 #[cfg(debug_assertions)]
                 {
                     if app_data.pointer_constraints.is_none() {
-                        println!("❌ Pointer constraints protocol not available");
+                        debug!("❌ Pointer constraints protocol not available");
                     }
                     if app_data.pointer.is_none() {
-                        println!("❌ Pointer device not available");
+                        debug!("❌ Pointer device not available");
                     }
                     if app_data.surface.is_none() {
-                        println!("❌ Surface not available");
+                        debug!("❌ Surface not available");
                     }
                     if app_data.compositor.is_none() {
-                        println!("❌ Compositor not available");
+                        debug!("❌ Compositor not available");
                     }
                 }
             }
@@ -684,7 +691,7 @@ impl PointerLockDaemon {
         }
         if let Some(app_data) = &mut self.app_data {
             if let Some(locked_pointer) = app_data.locked_pointer.take() {
-                println!("🔓 Unlocking pointer...");
+                info!("🔓 Unlocking pointer...");
                 locked_pointer.destroy();
                 self.is_locked = false;
                 // Stop cursor warping thread
@@ -699,11 +706,11 @@ impl PointerLockDaemon {
                 if let Some(event_queue) = &mut self.event_queue {
                     match event_queue.dispatch_pending(app_data) {
                         Ok(_) => {
-                            println!("✅ Pointer unlock processed");
+                            info!("✅ Pointer unlock processed");
                         }
                         Err(_e) => {
                             #[cfg(debug_assertions)]
-                            println!("❌ Error processing pointer unlock events: {}", _e);
+                            debug!("❌ Error processing pointer unlock events: {}", _e);
                         }
                     }
                 }
@@ -753,7 +760,7 @@ fn main() {
         }
     }
 
-    println!("Starting demonhide daemon...");
+    info!("Starting demonhide daemon...");
 
     let daemon = match PointerLockDaemon::new() {
         Ok(daemon) => daemon,
@@ -763,7 +770,7 @@ fn main() {
         }
     };
 
-    println!("Daemon initialized successfully");
+    info!("Daemon initialized successfully");
 
     let loop_ = MainLoop::new(None, false);
 
@@ -779,6 +786,6 @@ fn main() {
         glib::Continue(true)
     });
 
-    println!("Starting main loop...");
+    info!("Starting main loop...");
     loop_.run();
 }

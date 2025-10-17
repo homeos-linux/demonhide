@@ -12,3 +12,5 @@ glib = "0.17"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 x11 = { version = "2.21", features = ["xlib", "xfixes"] }
+log = "0.4"
+env_logger = "0.10"
