@@ -46,20 +46,19 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
             hidden
         };
 
-        // Helper: check STEAM_GAME atom on a window
+        // Helper: check STEAM_GAME atom presence on a window (treat presence as Steam game)
         let is_steam_game_window = |display: *mut x11::xlib::Display, w: x11::xlib::Window| -> bool {
-            // STEAM_GAME atom name
             let atom_name = std::ffi::CString::new("STEAM_GAME").unwrap();
             let atom = x11::xlib::XInternAtom(display, atom_name.as_ptr(), 0);
             if atom == 0 {
                 return false;
             }
+            // Query the property but treat any non-empty result as presence
             let mut actual_type: x11::xlib::Atom = 0;
             let mut actual_format: c_int = 0;
             let mut nitems: c_ulong = 0;
             let mut bytes_after: c_ulong = 0;
             let mut prop: *mut c_uchar = std::ptr::null_mut();
-            // Request 1 item of CARDINAL
             let res = x11::xlib::XGetWindowProperty(
                 display,
                 w,
@@ -67,7 +66,7 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
                 0,
                 1,
                 0,
-                x11::xlib::XA_CARDINAL,
+                x11::xlib::AnyPropertyType as x11::xlib::Atom,
                 &mut actual_type,
                 &mut actual_format,
                 &mut nitems,
@@ -80,12 +79,8 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
                 }
                 return false;
             }
-            // Interpret returned data as unsigned long
-            let val_ptr = prop as *mut c_ulong;
-            let value = *val_ptr as u64;
             x11::xlib::XFree(prop as *mut _);
-            // Compare to the provided STEAM_GAME value
-            value == 2073850u64
+            true
         };
 
         let display = x11::xlib::XOpenDisplay(ptr::null());
@@ -110,7 +105,9 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
 
         // Check if steam game first (no fullscreen requirement)
         let cursor_hidden = is_cursor_hidden(display);
-        if is_steam_game_window(display, focus_window) && cursor_hidden {
+        let steam_present = is_steam_game_window(display, focus_window);
+        debug!("X11 focused={} steam_present={} cursor_hidden={}", focus_window, steam_present, cursor_hidden);
+        if steam_present && cursor_hidden {
             x11::xlib::XCloseDisplay(display);
             return true;
         }
@@ -125,6 +122,9 @@ fn check_xwayland_fullscreen_with_hidden_cursor() -> bool {
         // Check if window is fullscreen (covers entire screen)
         let is_fullscreen =
             window_attrs.width >= screen_width && window_attrs.height >= screen_height;
+
+        debug!("Focused={} window_size={}x{} screen_size={}x{} is_fullscreen={} cursor_hidden={} steam_present={}",
+            focus_window, window_attrs.width, window_attrs.height, screen_width, screen_height, is_fullscreen, cursor_hidden, steam_present);
 
         // If fullscreen and cursor hidden, return true
         if is_fullscreen && cursor_hidden {
