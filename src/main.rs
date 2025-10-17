@@ -278,6 +278,7 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
                         // default scale 1 for now
                         let scale = guard.map(|(_, _, s)| s).unwrap_or(1);
                         *guard = Some((width as i32, height as i32, scale));
+                        println!("[debug] wl_output mode: {}x{} scale={}", width, height, scale);
                     }
                 }
             }
@@ -288,6 +289,7 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
                             Some((w, h, _)) => *guard = Some((w, h, factor as i32)),
                             None => *guard = Some((1920, 1080, factor as i32)),
                         }
+                        println!("[debug] wl_output scale event: factor={}", factor);
                     }
                 }
             }
@@ -427,27 +429,40 @@ impl PointerLockDaemon {
             if let Some(_surface) = &app_data.surface {
                 // 1) Try parsing GNOME monitors.xml into monitor list
                 if let Some(monitors) = Self::parse_gnome_monitors_list() {
+                    println!("[debug] parse_gnome_monitors_list returned {} monitors", monitors.len());
+                    for (i, m) in monitors.iter().enumerate() {
+                        println!("[debug] monitor[{}] = x={} y={} w={} h={} scale={}", i, m.0, m.1, m.2, m.3, m.4);
+                    }
+
                     // If only one monitor, use its center
                     if monitors.len() == 1 {
                         let (x, y, w, h, scale) = monitors[0];
+                        println!("[debug] Single monitor detected, selecting center");
                         return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
                     }
 
                     // If multiple monitors, try to get focused X11 window center and pick containing monitor
                     if let Some((fx, fy)) = Self::get_focused_x11_window_center() {
+                        println!("[debug] Focused X11 window center at {}x{}", fx, fy);
                         for (mx, my, mw, mh, scale) in &monitors {
                             let rx = *mx;
                             let ry = *my;
                             let rw = *mw * *scale;
                             let rh = *mh * *scale;
-                            if fx >= rx && fx < rx + rw && fy >= ry && fy < ry + rh {
+                            let contains = fx >= rx && fx < rx + rw && fy >= ry && fy < ry + rh;
+                            println!("[debug] testing monitor rect x={} y={} w={} h={} contains={} ", rx, ry, rw, rh, contains);
+                            if contains {
+                                println!("[debug] Selected monitor containing focused point: x={} y={} w={} h={} scale={}", rx, ry, rw, rh, scale);
                                 return Some(((rw) / 2 + rx, (rh) / 2 + ry));
                             }
                         }
+                    } else {
+                        println!("[debug] No focused X11 window center available to choose monitor");
                     }
 
                     // Fallback: use primary monitor (first)
                     let (x, y, w, h, scale) = monitors[0];
+                    println!("[debug] Falling back to primary monitor from monitors.xml");
                     return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
                 }
 
@@ -455,6 +470,7 @@ impl PointerLockDaemon {
                 if let Some(out_info) = &app_data.output_info {
                     if let Ok(guard) = out_info.lock() {
                         if let Some((w, h, scale)) = *guard {
+                            println!("[debug] Using wl_output info: w={} h={} scale={}", w, h, scale);
                             let center_x = (w * scale) / 2;
                             let center_y = (h * scale) / 2;
                             return Some((center_x, center_y));
