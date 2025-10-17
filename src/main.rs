@@ -567,17 +567,24 @@ impl PointerLockDaemon {
         unsafe {
             let display = x11::xlib::XOpenDisplay(ptr::null());
             if display.is_null() {
+                debug!("XOpenDisplay returned null");
                 return None;
             }
+            debug!("XOpenDisplay succeeded");
             let mut focus: x11::xlib::Window = 0;
             let mut revert: i32 = 0;
             x11::xlib::XGetInputFocus(display, &mut focus, &mut revert);
+            debug!("XGetInputFocus -> focus={} revert={}", focus, revert);
             if focus == 0 {
+                debug!("No focused window (focus == 0)");
                 x11::xlib::XCloseDisplay(display);
                 return None;
             }
             let mut attrs: x11::xlib::XWindowAttributes = std::mem::zeroed();
-            if x11::xlib::XGetWindowAttributes(display, focus, &mut attrs) == 0 {
+            let got_attrs = x11::xlib::XGetWindowAttributes(display, focus, &mut attrs);
+            debug!("XGetWindowAttributes returned {} for window {}", got_attrs, focus);
+            if got_attrs == 0 {
+                debug!("Failed to get window attributes for {}", focus);
                 x11::xlib::XCloseDisplay(display);
                 return None;
             }
@@ -585,7 +592,7 @@ impl PointerLockDaemon {
             let mut root_x = 0i32;
             let mut root_y = 0i32;
             let mut child_return: x11::xlib::Window = 0;
-            x11::xlib::XTranslateCoordinates(
+            let tx = x11::xlib::XTranslateCoordinates(
                 display,
                 focus,
                 x11::xlib::XDefaultRootWindow(display),
@@ -595,8 +602,10 @@ impl PointerLockDaemon {
                 &mut root_y,
                 &mut child_return,
             );
+            debug!("XTranslateCoordinates returned {} root_x={} root_y={} child_return={}", tx, root_x, root_y, child_return);
             let center_x = root_x + attrs.width / 2;
             let center_y = root_y + attrs.height / 2;
+            debug!("Focused window {} center at {}x{} (attrs w={} h={})", focus, center_x, center_y, attrs.width, attrs.height);
             x11::xlib::XCloseDisplay(display);
             Some((center_x as i32, center_y as i32))
         }
