@@ -431,7 +431,9 @@ impl PointerLockDaemon {
                     if monitors.len() == 1 {
                         let (x, y, w, h, scale) = monitors[0];
                         debug!("Single monitor detected, selecting center");
-                        return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
+                        let sw = if scale == 0 { w } else { w / scale };
+                        let sh = if scale == 0 { h } else { h / scale };
+                        return Some(((sw) / 2 + x, (sh) / 2 + y));
                     }
 
                     // If multiple monitors, try to get focused X11 window center and pick containing monitor
@@ -440,8 +442,8 @@ impl PointerLockDaemon {
                         for (mx, my, mw, mh, scale) in &monitors {
                             let rx = *mx;
                             let ry = *my;
-                            let rw = *mw * *scale;
-                            let rh = *mh * *scale;
+                            let rw = if *scale == 0 { *mw } else { *mw / *scale };
+                            let rh = if *scale == 0 { *mh } else { *mh / *scale };
                             let contains = fx >= rx && fx < rx + rw && fy >= ry && fy < ry + rh;
                             debug!("testing monitor rect x={} y={} w={} h={} contains={}", rx, ry, rw, rh, contains);
                             if contains {
@@ -456,7 +458,9 @@ impl PointerLockDaemon {
                     // Fallback: use primary monitor (first)
                     let (x, y, w, h, scale) = monitors[0];
                     debug!("Falling back to primary monitor from monitors.xml");
-                    return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
+                    let sw = if scale == 0 { w } else { w / scale };
+                    let sh = if scale == 0 { h } else { h / scale };
+                    return Some(((sw) / 2 + x, (sh) / 2 + y));
                 }
 
                 // 2) Prefer Wayland per-output info collected earlier
@@ -466,8 +470,8 @@ impl PointerLockDaemon {
                         for (_out, info_arc) in &app_data.outputs {
                             if let Ok(guard) = info_arc.lock() {
                                 if let Some((ox, oy, ow, oh, scale)) = *guard {
-                                    let rw = ow * scale;
-                                    let rh = oh * scale;
+                                    let rw = if scale == 0 { ow } else { ow / scale };
+                                    let rh = if scale == 0 { oh } else { oh / scale };
                                     let contains = fx >= ox && fx < ox + rw && fy >= oy && fy < oy + rh;
                                     debug!("testing stored output x={} y={} w={} h={} scale={} contains={}", ox, oy, rw, rh, scale, contains);
                                     if contains {
@@ -483,9 +487,11 @@ impl PointerLockDaemon {
                     // otherwise fallback to first output's center
                     if let Some((_out, info_arc)) = app_data.outputs.get(0) {
                         if let Ok(guard) = info_arc.lock() {
-                            if let Some((ox, oy, ow, oh, scale)) = *guard {
-                                let center_x = ox + (ow * scale) / 2;
-                                let center_y = oy + (oh * scale) / 2;
+                                if let Some((ox, oy, ow, oh, scale)) = *guard {
+                                let adjw = if scale == 0 { ow } else { ow / scale };
+                                let adjh = if scale == 0 { oh } else { oh / scale };
+                                let center_x = ox + adjw / 2;
+                                let center_y = oy + adjh / 2;
                                 debug!("Falling back to first stored output center {}x{}", center_x, center_y);
                                 return Some((center_x, center_y));
                             }
@@ -733,6 +739,13 @@ impl PointerLockDaemon {
 }
 
 fn main() {
+    // Init logger: default to debug in debug builds, info otherwise; allow RUST_LOG to override
+    #[cfg(debug_assertions)]
+    let default_level = "debug";
+    #[cfg(not(debug_assertions))]
+    let default_level = "info";
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_level)).init();
+
     // Simple argument parsing for --help and --version
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {
