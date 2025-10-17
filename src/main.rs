@@ -422,47 +422,33 @@ impl PointerLockDaemon {
         should_lock_pointer()
     }
 
-    // Read GNOME's monitors.xml file and try to extract primary monitor width/height/scale
-    fn read_gnome_monitors_xml() -> Option<(i32, i32, i32)> {
-        use std::fs;
-        let home = std::env::var("HOME").ok()?;
-        let path = format!("{}/.config/monitors.xml", home);
-        let contents = fs::read_to_string(path).ok()?;
-
-        // Find the first <monitor ...>...</monitor> block (or logicalmonitor) and extract width/height/scale
-        let lower = contents.to_lowercase();
-        let idx = lower.find("<monitor").or_else(|| lower.find("<logicalmonitor"))?;
-        let sub = &lower[idx..];
-        let end = sub.find("</monitor>").or_else(|| sub.find("</logicalmonitor>"));
-        let snippet = if let Some(e) = end { &sub[..e] } else { sub };
-
-        // Helper to extract integer from tags like <width>1234</width>
-        fn extract(tag: &str, s: &str) -> Option<i32> {
-            let open = format!("<{}>", tag);
-            let close = format!("</{}>", tag);
-            let a = s.find(&open)? + open.len();
-            let b = s[a..].find(&close)? + a;
-            s[a..b].trim().parse::<i32>().ok()
-        }
-
-        let width = extract("width", snippet).or_else(|| extract("modewidth", snippet));
-        let height = extract("height", snippet).or_else(|| extract("modeheight", snippet));
-        let scale = extract("scale", snippet).or(Some(1));
-
-        match (width, height, scale) {
-            (Some(w), Some(h), Some(s)) => Some((w, h, s)),
-            _ => None,
-        }
-    }
-
     fn get_wayland_surface_center(&self) -> Option<(i32, i32)> {
         if let Some(app_data) = &self.app_data {
             if let Some(_surface) = &app_data.surface {
-                // 1) Prefer GNOME settings if available (~/.config/monitors.xml)
-                if let Some((w, h, scale)) = Self::read_gnome_monitors_xml() {
-                    let center_x = (w * scale) / 2;
-                    let center_y = (h * scale) / 2;
-                    return Some((center_x, center_y));
+                // 1) Try parsing GNOME monitors.xml into monitor list
+                if let Some(monitors) = Self::parse_gnome_monitors_list() {
+                    // If only one monitor, use its center
+                    if monitors.len() == 1 {
+                        let (x, y, w, h, scale) = monitors[0];
+                        return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
+                    }
+
+                    // If multiple monitors, try to get focused X11 window center and pick containing monitor
+                    if let Some((fx, fy)) = Self::get_focused_x11_window_center() {
+                        for (mx, my, mw, mh, scale) in &monitors {
+                            let rx = *mx;
+                            let ry = *my;
+                            let rw = *mw * *scale;
+                            let rh = *mh * *scale;
+                            if fx >= rx && fx < rx + rw && fy >= ry && fy < ry + rh {
+                                return Some(((rw) / 2 + rx, (rh) / 2 + ry));
+                            }
+                        }
+                    }
+
+                    // Fallback: use primary monitor (first)
+                    let (x, y, w, h, scale) = monitors[0];
+                    return Some(((w * scale) / 2 + x, (h * scale) / 2 + y));
                 }
 
                 // 2) Prefer Wayland wl_output info collected earlier
@@ -495,6 +481,88 @@ impl PointerLockDaemon {
             }
         }
         None
+    }
+
+    // Parse GNOME monitors.xml into a vector of monitors: (x, y, width, height, scale)
+    fn parse_gnome_monitors_list() -> Option<Vec<(i32, i32, i32, i32, i32)>> {
+        use std::fs;
+        let home = std::env::var("HOME").ok()?;
+        let path = format!("{}/.config/monitors.xml", home);
+        let contents = fs::read_to_string(path).ok()?;
+        let lower = contents.to_lowercase();
+
+        let mut monitors = Vec::new();
+
+        // Very simple parse: find <monitor> or <logicalmonitor> entries and extract position/size/scale
+        let mut idx = 0usize;
+        while let Some(start) = lower[idx..].find('<') {
+            idx += start;
+            if lower[idx..].starts_with("<monitor") || lower[idx..].starts_with("<logicalmonitor") {
+                let end_tag = if lower[idx..].starts_with("<monitor") { "</monitor>" } else { "</logicalmonitor>" };
+                if let Some(end_rel) = lower[idx..].find(end_tag) {
+                    let snippet = &lower[idx..idx + end_rel];
+                    // extract tags
+                    let extract = |tag: &str| -> Option<i32> {
+                        let open = format!("<{}>", tag);
+                        let close = format!("</{}>", tag);
+                        let a = snippet.find(&open)? + open.len();
+                        let b = snippet[a..].find(&close)? + a;
+                        snippet[a..b].trim().parse::<i32>().ok()
+                    };
+                    let x = extract("x").unwrap_or(0);
+                    let y = extract("y").unwrap_or(0);
+                    let width = extract("width").or_else(|| extract("modewidth")).unwrap_or(1920);
+                    let height = extract("height").or_else(|| extract("modeheight")).unwrap_or(1080);
+                    let scale = extract("scale").unwrap_or(1);
+                    monitors.push((x, y, width, height, scale));
+                    idx += end_rel;
+                    continue;
+                }
+            }
+            idx += 1;
+        }
+
+        if monitors.is_empty() { None } else { Some(monitors) }
+    }
+
+    // Get center of the currently focused X11 window (root coordinates)
+    fn get_focused_x11_window_center() -> Option<(i32, i32)> {
+        unsafe {
+            let display = x11::xlib::XOpenDisplay(ptr::null());
+            if display.is_null() {
+                return None;
+            }
+            let mut focus: x11::xlib::Window = 0;
+            let mut revert: i32 = 0;
+            x11::xlib::XGetInputFocus(display, &mut focus, &mut revert);
+            if focus == 0 {
+                x11::xlib::XCloseDisplay(display);
+                return None;
+            }
+            let mut attrs: x11::xlib::XWindowAttributes = std::mem::zeroed();
+            if x11::xlib::XGetWindowAttributes(display, focus, &mut attrs) == 0 {
+                x11::xlib::XCloseDisplay(display);
+                return None;
+            }
+            // Translate window coordinates to root
+            let mut root_x = 0i32;
+            let mut root_y = 0i32;
+            let mut child_return: x11::xlib::Window = 0;
+            x11::xlib::XTranslateCoordinates(
+                display,
+                focus,
+                x11::xlib::XDefaultRootWindow(display),
+                0,
+                0,
+                &mut root_x,
+                &mut root_y,
+                &mut child_return,
+            );
+            let center_x = root_x + attrs.width / 2;
+            let center_y = root_y + attrs.height / 2;
+            x11::xlib::XCloseDisplay(display);
+            Some((center_x as i32, center_y as i32))
+        }
     }
 
     fn lock_pointer(&mut self) {
