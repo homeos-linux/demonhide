@@ -266,7 +266,10 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
                     match event {
                         wl_output::Event::Geometry { x, y, physical_width: _, physical_height: _, subpixel: _, make: _, model: _, transform: _ } => {
                             // store x,y (position); other fields handled elsewhere
-                            let (w, h, scale) = guard.unwrap_or((0, 0, 1));
+                            let (w, h, scale) = {
+                                let t = guard.unwrap_or((0, 0, 0, 0, 1));
+                                (t.2, t.3, t.4)
+                            };
                             *guard = Some((x as i32, y as i32, w, h, scale));
                             debug!("wl_output geometry: x={} y={}", x, y);
                         }
